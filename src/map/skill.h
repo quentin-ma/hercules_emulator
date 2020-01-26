@@ -2,8 +2,8 @@
  * This file is part of Hercules.
  * http://herc.ws - http://github.com/HerculesWS/Hercules
  *
- * Copyright (C) 2012-2018  Hercules Dev Team
- * Copyright (C)  Athena Dev Teams
+ * Copyright (C) 2012-2020 Hercules Dev Team
+ * Copyright (C) Athena Dev Teams
  *
  * Hercules is free software: you can redistribute it and/or modify
  * it under the terms of the GNU General Public License as published by
@@ -125,6 +125,7 @@ enum e_skill_inf2 {
 	INF2_SHOW_SKILL_SCALE  = 0x20000,
 	INF2_ALLOW_REPRODUCE   = 0x40000,
 	INF2_HIDDEN_TRAP       = 0x80000, // Traps that are hidden (based on trap_visiblity battle conf)
+	INF2_IS_COMBO_SKILL    = 0x100000, // Sets whether a skill can be used in combos or not
 };
 
 

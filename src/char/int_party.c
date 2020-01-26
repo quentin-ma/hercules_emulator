@@ -2,8 +2,8 @@
  * This file is part of Hercules.
  * http://herc.ws - http://github.com/HerculesWS/Hercules
  *
- * Copyright (C) 2012-2018  Hercules Dev Team
- * Copyright (C)  Athena Dev Teams
+ * Copyright (C) 2012-2020 Hercules Dev Team
+ * Copyright (C) Athena Dev Teams
  *
  * Hercules is free software: you can redistribute it and/or modify
  * it under the terms of the GNU General Public License as published by
@@ -118,7 +118,6 @@ static void inter_party_calc_state(struct party_data *p)
 		p->party.exp = 0; //Set off even share.
 		mapif->party_optionchanged(0, &p->party, 0, 0);
 	}
-	return;
 }
 
 // Save party to mysql
@@ -472,8 +471,11 @@ static bool inter_party_leave(int party_id, int account_id, int char_id)
 	mapif->party_withdraw(party_id, account_id, char_id);
 
 	j = p->party.member[i].lv;
-	if (p->party.member[i].online > 0)
+	if (p->party.member[i].online > 0) {
+		p->party.member[i].online = 0;
 		p->party.count--;
+	}
+	inter_party->tosql(&p->party, PS_DELMEMBER, i);
 	memset(&p->party.member[i], 0, sizeof(struct party_member));
 	p->size--;
 	if (j == p->min_lv || j == p->max_lv || p->family) {
@@ -482,7 +484,6 @@ static bool inter_party_leave(int party_id, int account_id, int char_id)
 	}
 
 	if (inter_party->check_empty(p) == 0) {
-		inter_party->tosql(&p->party, PS_DELMEMBER, i);
 		mapif->party_info(-1, &p->party, 0);
 	}
 	return true;
@@ -599,7 +600,6 @@ static int inter_party_parse_frommap(int fd)
 	case 0x3024: mapif->parse_PartyLeave(fd, RFIFOL(fd,2), RFIFOL(fd,6), RFIFOL(fd,10)); break;
 	case 0x3025: mapif->parse_PartyChangeMap(fd, RFIFOL(fd,2), RFIFOL(fd,6), RFIFOL(fd,10), RFIFOW(fd,14), RFIFOB(fd,16), RFIFOW(fd,17)); break;
 	case 0x3026: mapif->parse_BreakParty(fd, RFIFOL(fd,2)); break;
-	case 0x3027: mapif->parse_PartyMessage(fd, RFIFOL(fd,4), RFIFOL(fd,8), RFIFOP(fd,12), RFIFOW(fd,2)-12); break;
 	case 0x3029: mapif->parse_PartyLeaderChange(fd, RFIFOL(fd,2), RFIFOL(fd,6), RFIFOL(fd,10)); break;
 	default:
 		return 0;

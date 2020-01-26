@@ -2,8 +2,8 @@
  * This file is part of Hercules.
  * http://herc.ws - http://github.com/HerculesWS/Hercules
  *
- * Copyright (C) 2012-2018  Hercules Dev Team
- * Copyright (C)  Athena Dev Teams
+ * Copyright (C) 2012-2020 Hercules Dev Team
+ * Copyright (C) Athena Dev Teams
  *
  * Hercules is free software: you can redistribute it and/or modify
  * it under the terms of the GNU General Public License as published by
@@ -1258,6 +1258,9 @@ static void run_tomb(struct map_session_data *sd, struct npc_data *nd)
 	char time[10];
 
 	nullpo_retv(nd);
+
+	sd->npc_id = nd->bl.id;
+
 	strftime(time, sizeof(time), "%H:%M", localtime(&nd->u.tomb.kill_time));
 
 	// TODO: Find exact color?
@@ -1349,8 +1352,10 @@ static int npc_scriptcont(struct map_session_data *sd, int id, bool closing)
 		return 1;
 	}
 
-	if(id != npc->fake_nd->bl.id) { // Not item script
-		if ((npc->checknear(sd,target)) == NULL){
+	if (id != npc->fake_nd->bl.id) { // Not item script
+		if (sd->state.npc_unloaded != 0) {
+			sd->state.npc_unloaded = 0;
+		} else if ((npc->checknear(sd,target)) == NULL) {
 			ShowWarning("npc_scriptcont: failed npc->checknear test.\n");
 			return 1;
 		}
@@ -1371,8 +1376,10 @@ static int npc_scriptcont(struct map_session_data *sd, int id, bool closing)
 	if( sd->progressbar.npc_id && DIFF_TICK(sd->progressbar.timeout,timer->gettick()) > 0 )
 		return 1;
 
-	if( !sd->st )
+	if( !sd->st ) {
+		sd->npc_id = 0;
 		return 1;
+	}
 
 	if( closing && sd->st->state == CLOSE )
 		sd->st->state = END;
@@ -2115,7 +2122,7 @@ static int npc_buylist(struct map_session_data *sd, struct itemlist *item_list)
 /**
  * Processes incoming npc market purchase list
  **/
-static int npc_market_buylist(struct map_session_data *sd, struct itemlist *item_list)
+static enum market_buy_result npc_market_buylist(struct map_session_data *sd, struct itemlist *item_list)
 {
 	struct npc_data* nd;
 	struct npc_item_list *shop = NULL;
@@ -2129,7 +2136,7 @@ static int npc_market_buylist(struct map_session_data *sd, struct itemlist *item
 	nd = npc->checknear(sd,map->id2bl(sd->npc_shopid));
 
 	if (nd == NULL || nd->subtype != SCRIPT || VECTOR_LENGTH(*item_list) == 0 || !nd->u.scr.shop || nd->u.scr.shop->type != NST_MARKET)
-		return 1;
+		return MARKET_BUY_RESULT_ERROR;
 
 	shop = nd->u.scr.shop->item;
 	shop_size = nd->u.scr.shop->items;
@@ -2149,18 +2156,18 @@ static int npc_market_buylist(struct map_session_data *sd, struct itemlist *item
 				 entry->id == itemdb_viewid(shop[j].nameid) //item_avail replacement
 				 );
 		if (j == shop_size) /* TODO find official response for this */
-			return 1; // no such item in shop
+			return MARKET_BUY_RESULT_ERROR; // no such item in shop
 
 		entry->id = shop[j].nameid; //item_avail replacement
 
 		if (entry->amount > (int)shop[j].qty)
-			return 1;
+			return MARKET_BUY_RESULT_AMOUNT_TOO_BIG;
 
 		value = shop[j].value;
 		npc_market_qty[i] = j;
 
 		if (!itemdb->exists(entry->id)) /* TODO find official response for this */
-			return 1; // item no longer in itemdb
+			return MARKET_BUY_RESULT_ERROR; // item no longer in itemdb
 
 		if (!itemdb->isstackable(entry->id) && entry->amount > 1) {
 			//Exploit? You can't buy more than 1 of equipment types o.O
@@ -2184,13 +2191,13 @@ static int npc_market_buylist(struct map_session_data *sd, struct itemlist *item
 	}
 
 	if (z > sd->status.zeny) /* TODO find official response for this */
-		return 1; // Not enough Zeny
+		return MARKET_BUY_RESULT_NO_ZENY; // Not enough Zeny
 
 	if( w + sd->weight > sd->max_weight ) /* TODO find official response for this */
-		return 1; // Too heavy
+		return MARKET_BUY_RESULT_OVER_WEIGHT; // Too heavy
 
 	if( pc->inventoryblank(sd) < new_ ) /* TODO find official response for this */
-		return 1; // Not enough space to store items
+		return MARKET_BUY_RESULT_OUT_OF_SPACE; // Not enough space to store items
 
 	pc->payzeny(sd,(int)z,LOG_TYPE_NPC, NULL);
 
@@ -2200,7 +2207,7 @@ static int npc_market_buylist(struct map_session_data *sd, struct itemlist *item
 		j = npc_market_qty[i];
 
 		if (entry->amount > (int)shop[j].qty) /* wohoo someone tampered with the packet. */
-			return 1;
+			return MARKET_BUY_RESULT_AMOUNT_TOO_BIG;
 
 		shop[j].qty -= entry->amount;
 
@@ -2218,7 +2225,7 @@ static int npc_market_buylist(struct map_session_data *sd, struct itemlist *item
 		}
 	}
 
-	return 0;
+	return MARKET_BUY_RESULT_SUCCESS;
 }
 
 /**

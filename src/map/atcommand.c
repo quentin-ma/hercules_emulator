@@ -2,8 +2,8 @@
  * This file is part of Hercules.
  * http://herc.ws - http://github.com/HerculesWS/Hercules
  *
- * Copyright (C) 2012-2018  Hercules Dev Team
- * Copyright (C)  Athena Dev Teams
+ * Copyright (C) 2012-2020 Hercules Dev Team
+ * Copyright (C) Athena Dev Teams
  *
  * Hercules is free software: you can redistribute it and/or modify
  * it under the terms of the GNU General Public License as published by
@@ -511,7 +511,7 @@ ACMD(where)
 		return false;
 	}
 
-	pl_sd = map->nick2sd(atcmd_player_name);
+	pl_sd = map->nick2sd(atcmd_player_name, true);
 	if (pl_sd == NULL ||
 	    strncmp(pl_sd->status.name, atcmd_player_name, NAME_LENGTH) != 0 ||
 	    (pc_has_permission(pl_sd, PC_PERM_HIDE_SESSION) && pc_get_group_level(pl_sd) > pc_get_group_level(sd) && !pc_has_permission(sd, PC_PERM_WHO_DISPLAY_AID))
@@ -548,7 +548,7 @@ ACMD(jumpto)
 		return false;
 	}
 
-	if ((pl_sd=map->nick2sd(message)) == NULL && (pl_sd=map->charid2sd(atoi(message))) == NULL) {
+	if ((pl_sd=map->nick2sd(message, true)) == NULL && (pl_sd=map->charid2sd(atoi(message))) == NULL) {
 		clif->message(fd, msg_fd(fd,3)); // Character not found.
 		return false;
 	}
@@ -1107,8 +1107,10 @@ ACMD(kami)
 		sscanf(message, "%199[^\n]", atcmd_output);
 		if (stristr(info->command, "l") != NULL)
 			clif->broadcast(&sd->bl, atcmd_output, (int)strlen(atcmd_output) + 1, BC_DEFAULT, ALL_SAMEMAP);
+		else if (info->command[4] == 'b' || info->command[4] == 'B')
+			clif->broadcast(NULL, atcmd_output, (int)strlen(atcmd_output) + 1, BC_BLUE, ALL_CLIENT);
 		else
-			intif->broadcast(atcmd_output, (int)strlen(atcmd_output) + 1, (*(info->command + 4) == 'b' || *(info->command + 4) == 'B') ? BC_BLUE : BC_YELLOW);
+			clif->broadcast(NULL, atcmd_output, (int)strlen(atcmd_output) + 1, BC_YELLOW, ALL_CLIENT);
 	} else {
 		if(!*message || (sscanf(message, "%10u %199[^\n]", &color, atcmd_output) < 2)) {
 			clif->message(fd, msg_fd(fd,981)); // Please enter color and message (usage: @kamic <color> <message>).
@@ -1119,7 +1121,7 @@ ACMD(kami)
 			clif->message(fd, msg_fd(fd,982)); // Invalid color.
 			return false;
 		}
-		intif->broadcast2(atcmd_output, (int)strlen(atcmd_output) + 1, color, 0x190, 12, 0, 0);
+		clif->broadcast2(NULL, atcmd_output, (int)strlen(atcmd_output) + 1, color, 0x190, 12, 0, 0, ALL_CLIENT);
 	}
 	return true;
 }
@@ -2475,7 +2477,7 @@ ACMD(displaystatus)
 	if( flag == 0 )
 		clif->sc_end(&sd->bl,sd->bl.id,AREA,type);
 	else
-		clif->status_change(&sd->bl, type, flag, tick, val1, val2, val3);
+		clif->status_change(&sd->bl, type, BL_PC, flag, tick, val1, val2, val3);
 
 	return true;
 }
@@ -2902,7 +2904,7 @@ ACMD(recall)
 		return false;
 	}
 
-	if ((pl_sd=map->nick2sd(message)) == NULL && (pl_sd=map->charid2sd(atoi(message))) == NULL) {
+	if ((pl_sd=map->nick2sd(message, true)) == NULL && (pl_sd=map->charid2sd(atoi(message))) == NULL) {
 		clif->message(fd, msg_fd(fd,3)); // Character not found.
 		return false;
 	}
@@ -3227,7 +3229,7 @@ ACMD(kick)
 		return false;
 	}
 
-	if ((pl_sd=map->nick2sd(message)) == NULL && (pl_sd=map->charid2sd(atoi(message))) == NULL) {
+	if ((pl_sd=map->nick2sd(message, true)) == NULL && (pl_sd=map->charid2sd(atoi(message))) == NULL) {
 		clif->message(fd, msg_fd(fd,3)); // Character not found.
 		return false;
 	}
@@ -3557,7 +3559,7 @@ ACMD(idsearch)
 
 	safesnprintf(atcmd_output, sizeof(atcmd_output), msg_fd(fd,77), item_name); // Search results for '%s' (name: id):
 	clif->message(fd, atcmd_output);
-	match = itemdb->search_name_array(item_array, MAX_SEARCH, item_name, 0);
+	match = itemdb->search_name_array(item_array, MAX_SEARCH, item_name, IT_SEARCH_NAME_PARTIAL);
 	if (match > MAX_SEARCH) {
 		safesnprintf(atcmd_output, sizeof(atcmd_output), msg_fd(fd,269), MAX_SEARCH, match);
 		clif->message(fd, atcmd_output);
@@ -4362,7 +4364,7 @@ ACMD(nuke)
 		return false;
 	}
 
-	if ((pl_sd = map->nick2sd(atcmd_player_name)) != NULL) {
+	if ((pl_sd = map->nick2sd(atcmd_player_name, true)) != NULL) {
 		if (pc_get_group_level(sd) >= pc_get_group_level(pl_sd)) { // you can kill only lower or same GM level
 			skill->castend_nodamage_id(&pl_sd->bl, &pl_sd->bl, NPC_SELFDESTRUCTION, 99, timer->gettick(), 0);
 			clif->message(fd, msg_fd(fd,109)); // Player has been nuked!
@@ -4682,7 +4684,7 @@ ACMD(jail)
 		return false;
 	}
 
-	if ((pl_sd = map->nick2sd(atcmd_player_name)) == NULL) {
+	if ((pl_sd = map->nick2sd(atcmd_player_name, true)) == NULL) {
 		clif->message(fd, msg_fd(fd,3)); // Character not found.
 		return false;
 	}
@@ -4734,7 +4736,7 @@ ACMD(unjail)
 		return false;
 	}
 
-	if ((pl_sd = map->nick2sd(atcmd_player_name)) == NULL) {
+	if ((pl_sd = map->nick2sd(atcmd_player_name, true)) == NULL) {
 		clif->message(fd, msg_fd(fd,3)); // Character not found.
 		return false;
 	}
@@ -4813,7 +4815,7 @@ ACMD(jailfor)
 		return false;
 	}
 
-	if ((pl_sd = map->nick2sd(atcmd_player_name)) == NULL) {
+	if ((pl_sd = map->nick2sd(atcmd_player_name, true)) == NULL) {
 		clif->message(fd, msg_fd(fd,3)); // Character not found.
 		return false;
 	}
@@ -5125,7 +5127,7 @@ ACMD(broadcast)
 	}
 
 	safesnprintf(atcmd_output, sizeof(atcmd_output), "%s: %s", sd->status.name, message);
-	intif->broadcast(atcmd_output, (int)strlen(atcmd_output) + 1, BC_DEFAULT);
+	clif->broadcast(NULL, atcmd_output, (int)strlen(atcmd_output) + 1, BC_DEFAULT, ALL_CLIENT);
 
 	return true;
 }
@@ -5344,7 +5346,7 @@ ACMD(follow)
 		return true;
 	}
 
-	if ((pl_sd = map->nick2sd(message)) == NULL) {
+	if ((pl_sd = map->nick2sd(message, true)) == NULL) {
 		clif->message(fd, msg_fd(fd,3)); // Character not found.
 		return false;
 	}
@@ -5367,7 +5369,6 @@ ACMD(follow)
 ACMD(dropall)
 {
 	int type = -1;
-	int count = 0;
 
 	if (message[0] != '\0') {
 		type = atoi(message);
@@ -5378,25 +5379,32 @@ ACMD(dropall)
 		}
 	}
 
+	int count = 0, count_skipped = 0;
 	for (int i = 0; i < sd->status.inventorySize; i++) {
-		if (sd->status.inventory[i].amount) {
+		if (sd->status.inventory[i].amount > 0) {
 			struct item_data *item_data = itemdb->exists(sd->status.inventory[i].nameid);
 			if (item_data == NULL) {
 				ShowWarning("Non-existant item %d on dropall list (account_id: %d, char_id: %d)\n", sd->status.inventory[i].nameid, sd->status.account_id, sd->status.char_id);
 				continue;
 			}
+			
 			if (!pc->candrop(sd, &sd->status.inventory[i]))
 				continue;
+			
 			if (type == -1 || type == item_data->type) {
 				if (sd->status.inventory[i].equip != 0)
 					pc->unequipitem(sd, i, PCUNEQUIPITEM_RECALC | PCUNEQUIPITEM_FORCE);
-				count += sd->status.inventory[i].amount;
-				pc->dropitem(sd, i, sd->status.inventory[i].amount);
+				
+				int amount = sd->status.inventory[i].amount;
+				if (pc->dropitem(sd, i, amount) != 0)
+					count += amount;
+				else
+					count_skipped += amount;
 			}
 		}
 	}
 
-	sprintf(atcmd_output, msg_fd(fd, 1502), count); // %d items are dropped!
+	sprintf(atcmd_output, msg_fd(fd, 1502), count, count_skipped); // %d items are dropped (%d skipped)!
 	clif->message(fd, atcmd_output);
 	return true;
 }
@@ -5594,7 +5602,7 @@ ACMD(useskill)
 
 	if (!strcmp(target,"self"))
 		pl_sd = sd; //quick keyword
-	else if ((pl_sd = map->nick2sd(target)) == NULL) {
+	else if ((pl_sd = map->nick2sd(target, true)) == NULL) {
 		clif->message(fd, msg_fd(fd,3)); // Character not found.
 		return false;
 	}
@@ -5662,7 +5670,7 @@ ACMD(skilltree)
 		return false;
 	}
 
-	if ( (pl_sd = map->nick2sd(target)) == NULL ) {
+	if ( (pl_sd = map->nick2sd(target, true)) == NULL ) {
 		clif->message(fd, msg_fd(fd,3)); // Character not found.
 		return false;
 	}
@@ -5732,7 +5740,7 @@ ACMD(marry)
 		return false;
 	}
 
-	if ((pl_sd = map->nick2sd(player_name)) == NULL) {
+	if ((pl_sd = map->nick2sd(player_name, true)) == NULL) {
 		clif->message(fd, msg_fd(fd,3));
 		return false;
 	}
@@ -5862,7 +5870,7 @@ ACMD(changegm)
 		return false;
 	}
 
-	if ((pl_sd=map->nick2sd(message)) == NULL || pl_sd->status.guild_id != sd->status.guild_id) {
+	if ((pl_sd=map->nick2sd(message, true)) == NULL || pl_sd->status.guild_id != sd->status.guild_id) {
 		clif->message(fd, msg_fd(fd,1184)); // Target character must be online and be a guild member.
 		return false;
 	}
@@ -5883,7 +5891,7 @@ ACMD(changeleader)
 		return false;
 	}
 
-	if (party->changeleader(sd, map->nick2sd(message)))
+	if (party->changeleader(sd, map->nick2sd(message, true)))
 		return true;
 	return false;
 }
@@ -6347,7 +6355,7 @@ ACMD(mobsearch)
 	}
 	if (mob_id == atoi(mob_name)) {
 		strcpy(mob_name,mob->db(mob_id)->jname); // DEFAULT_MOB_JNAME
-		//strcpy(mob_name,mob_db(mob_id)->name); // DEFAULT_MOB_NAME
+		//strcpy(mob_name,mob->db(mob_id)->name); // DEFAULT_MOB_NAME
 	}
 
 	snprintf(atcmd_output, sizeof atcmd_output, msg_fd(fd,1220), mob_name, mapindex_id2name(sd->mapindex)); // Mob Search... %s %s
@@ -6649,7 +6657,7 @@ ACMD(trade)
 		return false;
 	}
 
-	if ((pl_sd = map->nick2sd(message)) == NULL) {
+	if ((pl_sd = map->nick2sd(message, true)) == NULL) {
 		clif->message(fd, msg_fd(fd,3)); // Character not found.
 		return false;
 	}
@@ -6693,7 +6701,7 @@ ACMD(unmute)
 		return false;
 	}
 
-	if ((pl_sd = map->nick2sd(message)) == NULL) {
+	if ((pl_sd = map->nick2sd(message, true)) == NULL) {
 		clif->message(fd, msg_fd(fd,3)); // Character not found.
 		return false;
 	}
@@ -6748,6 +6756,18 @@ ACMD(changesex)
 	return true;
 }
 
+ACMD(changecharsex)
+{
+	int i;
+
+	pc->resetskill(sd, PCRESETSKILL_CHSEX);
+	// to avoid any problem with equipment and invalid sex, equipment is unequipped.
+	for (i=0; i<EQI_MAX; i++)
+		if (sd->equip_index[i] >= 0) pc->unequipitem(sd, sd->equip_index[i], PCUNEQUIPITEM_RECALC|PCUNEQUIPITEM_FORCE);
+	chrif->changesex(sd, false);
+	return true;
+}
+
 /*================================================
  * @mute - Mutes a player for a set amount of time
  *------------------------------------------------*/
@@ -6761,7 +6781,7 @@ ACMD(mute)
 		return false;
 	}
 
-	if ((pl_sd = map->nick2sd(atcmd_player_name)) == NULL) {
+	if ((pl_sd = map->nick2sd(atcmd_player_name, true)) == NULL) {
 		clif->message(fd, msg_fd(fd,3)); // Character not found.
 		return false;
 	}
@@ -7058,7 +7078,7 @@ ACMD(showmobs)
 
 	if (mob_id == atoi(mob_name)) {
 		strcpy(mob_name,mob->db(mob_id)->jname); // DEFAULT_MOB_JNAME
-		//strcpy(mob_name,mob_db(mob_id)->name); // DEFAULT_MOB_NAME
+		//strcpy(mob_name,mob->db(mob_id)->name); // DEFAULT_MOB_NAME
 	}
 
 	snprintf(atcmd_output, sizeof atcmd_output, msg_fd(fd,1252), // Mob Search... %s %s
@@ -7439,7 +7459,7 @@ ACMD(iteminfo)
 		return false;
 	}
 	if ((item_array[0] = itemdb->exists(atoi(message))) == NULL)
-		count = itemdb->search_name_array(item_array, MAX_SEARCH, message, 0);
+		count = itemdb->search_name_array(item_array, MAX_SEARCH, message, IT_SEARCH_NAME_PARTIAL);
 
 	if (!count) {
 		clif->message(fd, msg_fd(fd,19)); // Invalid item ID or name.
@@ -7490,7 +7510,7 @@ ACMD(whodrops)
 		return false;
 	}
 	if ((item_array[0] = itemdb->exists(atoi(message))) == NULL)
-		count = itemdb->search_name_array(item_array, MAX_SEARCH, message, 0);
+		count = itemdb->search_name_array(item_array, MAX_SEARCH, message, IT_SEARCH_NAME_PARTIAL);
 
 	if (!count) {
 		clif->message(fd, msg_fd(fd,19)); // Invalid item ID or name.
@@ -7971,7 +7991,7 @@ ACMD(showdelay)
 ACMD(invite)
 {
 	unsigned int did = sd->duel_group;
-	struct map_session_data *target_sd = map->nick2sd(message);
+	struct map_session_data *target_sd = map->nick2sd(message, true);
 
 	if (did == 0)
 	{
@@ -8044,7 +8064,7 @@ ACMD(duel)
 			}
 			duel->create(sd, maxpl);
 		} else {
-			struct map_session_data *target_sd = map->nick2sd(message);
+			struct map_session_data *target_sd = map->nick2sd(message, true);
 			if (target_sd != NULL) {
 				unsigned int newduel;
 				if ((newduel = duel->create(sd, 2)) != -1) {
@@ -8189,7 +8209,7 @@ ACMD(clone)
 		return false;
 	}
 
-	if ((pl_sd=map->nick2sd(message)) == NULL && (pl_sd=map->charid2sd(atoi(message))) == NULL) {
+	if ((pl_sd=map->nick2sd(message, true)) == NULL && (pl_sd=map->charid2sd(atoi(message))) == NULL) {
 		clif->message(fd, msg_fd(fd,3)); // Character not found.
 		return false;
 	}
@@ -8263,7 +8283,7 @@ ACMD(request)
 	}
 
 	safesnprintf(atcmd_output, sizeof(atcmd_output), msg_fd(fd,278), message); // (@request): %s
-	intif->wis_message_to_gm(sd->status.name, PC_PERM_RECEIVE_REQUESTS, atcmd_output);
+	pc->wis_message_to_gm(sd->status.name, PC_PERM_RECEIVE_REQUESTS, atcmd_output);
 	clif_disp_onlyself(sd, atcmd_output);
 	clif->message(sd->fd,msg_fd(fd,279)); // @request sent.
 	return true;
@@ -8276,6 +8296,15 @@ ACMD(feelreset)
 {
 	pc->resetfeel(sd);
 	clif->message(fd, msg_fd(fd,1324)); // Reset 'Feeling' maps.
+
+	return true;
+}
+
+// Reset hatred targets [Wolfie]
+ACMD(hatereset)
+{
+	pc->resethate(sd);
+	clif->message(fd, msg_fd(fd, 979)); // Reset 'Hatred' targets.
 
 	return true;
 }
@@ -9307,7 +9336,7 @@ ACMD(channel)
 			return false;
 		}
 
-		if (sub4[0] == '\0' || (pl_sd = map->nick2sd(sub4)) == NULL) {
+		if (sub4[0] == '\0' || (pl_sd = map->nick2sd(sub4, true)) == NULL) {
 			safesnprintf(atcmd_output, sizeof(atcmd_output), msg_fd(fd,1434), sub4);// Player '%s' was not found
 			clif->message(fd, atcmd_output);
 			return false;
@@ -9354,7 +9383,7 @@ ACMD(channel)
 			clif->message(fd, atcmd_output);
 			return false;
 		}
-		if (sub4[0] == '\0' || (pl_sd = map->nick2sd(sub4)) == NULL) {
+		if (sub4[0] == '\0' || (pl_sd = map->nick2sd(sub4, true)) == NULL) {
 			safesnprintf(atcmd_output, sizeof(atcmd_output), msg_fd(fd,1434), sub4);// Player '%s' was not found
 			clif->message(fd, atcmd_output);
 			return false;
@@ -10113,6 +10142,7 @@ static void atcommand_basecommands(void)
 		ACMD_DEF(clearweather),
 		ACMD_DEF(uptime),
 		ACMD_DEF(changesex),
+		ACMD_DEF(changecharsex),
 		ACMD_DEF(mute),
 		ACMD_DEF(refresh),
 		ACMD_DEF(refreshall),
@@ -10180,6 +10210,7 @@ static void atcommand_basecommands(void)
 		ACMD_DEF(homshuffle),
 		ACMD_DEF(showmobs),
 		ACMD_DEF(feelreset),
+		ACMD_DEF(hatereset),
 		ACMD_DEF(auction),
 		ACMD_DEF(mail),
 		ACMD_DEF2("noks", ksprotection),
@@ -10448,7 +10479,7 @@ static bool atcommand_exec(const int fd, struct map_session_data *sd, const char
 			return true;
 		}
 
-		ssd = map->nick2sd(charname);
+		ssd = map->nick2sd(charname, true);
 		if (ssd == NULL) {
 			sprintf(output, msg_fd(fd,1389), command); // %s failed. Player not found.
 			clif->message(fd, output);

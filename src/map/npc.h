@@ -2,8 +2,8 @@
  * This file is part of Hercules.
  * http://herc.ws - http://github.com/HerculesWS/Hercules
  *
- * Copyright (C) 2012-2018  Hercules Dev Team
- * Copyright (C)  Athena Dev Teams
+ * Copyright (C) 2012-2020 Hercules Dev Team
+ * Copyright (C) Athena Dev Teams
  *
  * Hercules is free software: you can redistribute it and/or modify
  * it under the terms of the GNU General Public License as published by
@@ -33,6 +33,8 @@
 struct hplugin_data_store;
 struct itemlist; // map/itemdb.h
 struct view_data;
+
+enum market_buy_result;
 
 enum npc_parse_options {
 	NPO_NONE  = 0x0,
@@ -149,7 +151,7 @@ enum actor_classes {
 #define MAX_NPC_CLASS 1000
 // New NPC range
 #define MAX_NPC_CLASS2_START 10001
-#define MAX_NPC_CLASS2_END 10310
+#define MAX_NPC_CLASS2_END 10344
 
 //Script NPC events.
 enum npce_event {
@@ -310,7 +312,7 @@ struct npc_interface {
 	void (*trader_count_funds) (struct npc_data *nd, struct map_session_data *sd);
 	bool (*trader_pay) (struct npc_data *nd, struct map_session_data *sd, int price, int points);
 	void (*trader_update) (int master);
-	int (*market_buylist) (struct map_session_data *sd, struct itemlist *item_list);
+	enum market_buy_result (*market_buylist) (struct map_session_data *sd, struct itemlist *item_list);
 	int (*barter_buylist) (struct map_session_data *sd, struct barteritemlist *item_list);
 	bool (*trader_open) (struct map_session_data *sd, struct npc_data *nd);
 	void (*market_fromsql) (void);
