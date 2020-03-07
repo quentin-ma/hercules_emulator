@@ -67,20 +67,6 @@
 
 #define SKILLUNITTIMER_INTERVAL 100
 
-// ranges reserved for mapping skill ids to skilldb offsets
-#define HM_SKILLRANGEMIN 750
-#define HM_SKILLRANGEMAX (HM_SKILLRANGEMIN + MAX_HOMUNSKILL)
-#define MC_SKILLRANGEMIN (HM_SKILLRANGEMAX + 1)
-#define MC_SKILLRANGEMAX (MC_SKILLRANGEMIN + MAX_MERCSKILL)
-#define EL_SKILLRANGEMIN (MC_SKILLRANGEMAX + 1)
-#define EL_SKILLRANGEMAX (EL_SKILLRANGEMIN + MAX_ELEMENTALSKILL)
-#define GD_SKILLRANGEMIN (EL_SKILLRANGEMAX + 1)
-#define GD_SKILLRANGEMAX (GD_SKILLRANGEMIN + MAX_GUILDSKILL)
-
-#if GD_SKILLRANGEMAX > 999
-	#error GD_SKILLRANGEMAX is greater than 999
-#endif
-
 static struct skill_interface skill_s;
 static struct s_skill_dbs skilldbs;
 
@@ -110,41 +96,55 @@ static int skill_name2id(const char *name)
 /// Returns the skill's array index, or 0 (Unknown Skill).
 static int skill_get_index(int skill_id)
 {
-	// avoid ranges reserved for mapping guild/homun/mercenary skills
-	if( (skill_id >= GD_SKILLRANGEMIN && skill_id <= GD_SKILLRANGEMAX)
-	||  (skill_id >= HM_SKILLRANGEMIN && skill_id <= HM_SKILLRANGEMAX)
-	||  (skill_id >= MC_SKILLRANGEMIN && skill_id <= MC_SKILLRANGEMAX)
-	||  (skill_id >= EL_SKILLRANGEMIN && skill_id <= EL_SKILLRANGEMAX) )
-		return 0;
+	int skillRange[] = { NV_BASIC, NPC_LEX_AETERNA,
+			KN_CHARGEATK, SA_ELEMENTWIND,
+			RK_ENCHANTBLADE, AB_SILENTIUM,
+			WL_WHITEIMPRISON, SC_FEINTBOMB,
+			LG_CANNONSPEAR, SR_GENTLETOUCH_REVITALIZE,
+			WA_SWING_DANCE, WA_MOONLIT_SERENADE,
+			MI_RUSH_WINDMILL, MI_HARMONIZE,
+			WM_LESSON, WM_UNLIMITED_HUMMING_VOICE,
+			SO_FIREWALK, SO_EARTH_INSIGNIA,
+			GN_TRAINING_SWORD, GN_SLINGITEM_RANGEMELEEATK,
+			AB_SECRAMENT, LG_OVERBRAND_PLUSATK,
+			ALL_ODINS_RECALL, ALL_LIGHTGUARD,
+			RL_GLITTERING_GREED, RL_GLITTERING_GREED_ATK,
+			KO_YAMIKUMO, OB_AKAITSUKI,
+			ECL_SNOWFLIP, ALL_THANATOS_RECALL,
+			GC_DARKCROW, NC_MAGMA_ERUPTION_DOTDAMAGE,
+			SU_BASIC_SKILL, SU_SPIRITOFSEA,
+			HLIF_HEAL, MH_VOLCANIC_ASH,
+			MS_BASH, MER_INVINCIBLEOFF2,
+			EL_CIRCLE_OF_FIRE, EL_STONE_RAIN,
+			GD_APPROVAL, GD_DEVELOPMENT
+			CUSTOM_SKILL_RANGES};
+	int length = sizeof(skillRange) / sizeof(int);
+	STATIC_ASSERT(sizeof(skillRange) / sizeof(int) % 2 == 0, "skill_get_index: skillRange should be multiple of 2");
 
-	// map skill id to skill db index
-	if( skill_id >= GD_SKILLBASE )
-		skill_id = GD_SKILLRANGEMIN + skill_id - GD_SKILLBASE;
-	else if( skill_id >= EL_SKILLBASE )
-		skill_id = EL_SKILLRANGEMIN + skill_id - EL_SKILLBASE;
-	else if( skill_id >= MC_SKILLBASE )
-		skill_id = MC_SKILLRANGEMIN + skill_id - MC_SKILLBASE;
-	else if( skill_id >= HM_SKILLBASE )
-		skill_id = HM_SKILLRANGEMIN + skill_id - HM_SKILLBASE;
-	//[Ind/Hercules] GO GO GO LESS! - http://herc.ws/board/topic/512-skill-id-processing-overhaul/
-	else if( skill_id > 1019 && skill_id < 8001 ) {
-		if( skill_id < 2058 ) // 1020 - 2000 are empty
-			skill_id = 1020 + skill_id - 2001;
-		else if( skill_id < 2549 ) // 2058 - 2200 are empty - 1020+57
-			skill_id = (1077) + skill_id - 2201;
-		else if ( skill_id < 3036 ) // 2549 - 3000 are empty - 1020+57+348
-			skill_id = (1425) + skill_id - 3001;
-		else if ( skill_id < 5044 ) // 3036 - 5000 are empty - 1020+57+348+35
-			skill_id = (1460) + skill_id - 5001;
-		else
-			ShowWarning("skill_get_index: skill id '%d' is not being handled!\n",skill_id);
+
+	if (skill_id < skillRange[0] || skill_id > skillRange[length - 1]) {
+		ShowWarning("skill_get_index: skill id '%d' is not being handled!\n", skill_id);
+		return 0;
 	}
 
-	// validate result
-	if (skill_id <= 0|| skill_id >= MAX_SKILL_DB)
-		return 0;
+	int skill_idx = 0;
+	// Map Skill ID to Skill Indexes (in reverse order)
+	for (int i = 0; i < length; i += 2) {
+		// Check if SkillID belongs to this range.
+		if (skill_id <= skillRange[i + 1] && skill_id >= skillRange[i]) {
+			skill_idx += (skillRange[i + 1] - skill_id);
+			break;
+		}
+		// Add the difference of current range
+		skill_idx += (skillRange[i + 1] - skillRange[i] + 1);
+	}
 
-	return skill_id;
+	if (skill_idx >= MAX_SKILL_DB) {
+		ShowWarning("skill_get_index: skill id '%d'(idx: %d) is not being handled as it exceeds MAX_SKILL_DB!\n", skill_id, skill_idx);
+		return 0;
+	}
+
+	return skill_idx;
 }
 
 static const char *skill_get_name(int skill_id)
@@ -4190,6 +4190,11 @@ static void skill_castend_type(int type, struct block_list *src, struct block_li
 			skill->castend_damage_id(src, bl, skill_id, skill_lv, tick, flag);
 			break;
 	}
+
+	struct map_session_data *sd = BL_CAST(BL_PC, src);
+
+	if (sd != NULL)
+		pc->itemskill_clear(sd);
 }
 
 /*==========================================
@@ -5613,6 +5618,8 @@ static int skill_castend_id(int tid, int64 tick, int id, intptr_t data)
 
 	// Use a do so that you can break out of it when the skill fails.
 	do {
+		bool is_asura = (ud->skill_id == MO_EXTREMITYFIST);
+
 		if(!target || target->prev==NULL) break;
 
 		if(src->m != target->m || status->isdead(src)) break;
@@ -5845,7 +5852,8 @@ static int skill_castend_id(int tid, int64 tick, int id, intptr_t data)
 			ud->skill_lv = ud->skilltarget = 0;
 		}
 
-		if (src->id != target->id)
+		// Asura Strike caster doesn't look to their target in the end
+		if (src->id != target->id && !is_asura)
 			unit->setdir(src, map->calc_dir(src, target->x, target->y));
 
 		map->freeblock_unlock();
@@ -5870,19 +5878,30 @@ static int skill_castend_id(int tid, int64 tick, int id, intptr_t data)
 		if (target && target->m == src->m) {
 			//Move character to target anyway.
 			int dir, x, y;
+			int dist = 3; // number of cells that asura caster will walk
+
 			dir = map->calc_dir(src,target->x,target->y);
-			if( dir > 0 && dir < 4) x = -2;
-			else if( dir > 4 ) x = 2;
-			else x = 0;
-			if( dir > 2 && dir < 6 ) y = -2;
-			else if( dir == 7 || dir < 2 ) y = 2;
-			else y = 0;
-			if (unit->movepos(src, src->x+x, src->y+y, 1, 1)) {
+			if (dir > 0 && dir < 4)
+				x = -dist;
+			else if (dir > 4)
+				x = dist;
+			else
+				x = 0;
+			
+			if (dir > 2 && dir < 6)
+				y = -dist;
+			else if (dir == 7 || dir < 2)
+				y = dist;
+			else
+				y = 0;
+
+			if (unit->movepos(src, src->x + x, src->y + y, 1, 1) == 1) {
 				//Display movement + animation.
-				clif->slide(src,src->x,src->y);
+				clif->slide(src, src->x, src->y);
 				clif->spiritball(src);
 			}
-			clif->skill_fail(sd, ud->skill_id, USESKILL_FAIL_LEVEL, 0, 0);
+			// "Skill Failed" message was already shown when checking that target is invalid
+			//clif->skill_fail(sd, ud->skill_id, USESKILL_FAIL_LEVEL, 0, 0);
 		}
 	}
 
@@ -7306,27 +7325,34 @@ static int skill_castend_nodamage_id(struct block_list *src, struct block_list *
 			break;
 
 		case PR_STRECOVERY:
-			if(status->isimmune(bl)) {
-				clif->skill_nodamage(src,bl,skill_id,skill_lv,0);
+			if (status->isimmune(bl) != 0) {
+				clif->skill_nodamage(src, bl, skill_id, skill_lv, 0);
 				break;
 			}
-			if (tsc && tsc->opt1) {
-				status_change_end(bl, SC_FREEZE, INVALID_TIMER);
-				status_change_end(bl, SC_STONE, INVALID_TIMER);
-				status_change_end(bl, SC_SLEEP, INVALID_TIMER);
-				status_change_end(bl, SC_STUN, INVALID_TIMER);
-				status_change_end(bl, SC_WHITEIMPRISON, INVALID_TIMER);
+
+			if (!battle->check_undead(tstatus->race, tstatus->def_ele)) {
+				if (tsc != NULL && tsc->opt1 != 0) {
+					status_change_end(bl, SC_FREEZE, INVALID_TIMER);
+					status_change_end(bl, SC_STONE, INVALID_TIMER);
+					status_change_end(bl, SC_SLEEP, INVALID_TIMER);
+					status_change_end(bl, SC_STUN, INVALID_TIMER);
+					status_change_end(bl, SC_WHITEIMPRISON, INVALID_TIMER);
+				}
+
+				status_change_end(bl, SC_NETHERWORLD, INVALID_TIMER);
+			} else {
+				int rate = 100 * (100 - (tstatus->int_ / 2 + tstatus->vit / 3 + tstatus->luk / 10));
+				int duration = skill->get_time2(skill_id, skill_lv);
+
+				duration *= (100 - (tstatus->int_ + tstatus->vit) / 2) / 100;
+				status->change_start(src, bl, SC_BLIND, rate, 1, 0, 0, 0, duration, SCFLAG_NONE);
 			}
-			status_change_end(bl, SC_NETHERWORLD, INVALID_TIMER);
-			//Is this equation really right? It looks so... special.
-			if( battle->check_undead(tstatus->race,tstatus->def_ele) ) {
-				status->change_start(src, bl, SC_BLIND,
-				                     100*(100-(tstatus->int_/2+tstatus->vit/3+tstatus->luk/10)), 1,0,0,0,
-				                     skill->get_time2(skill_id, skill_lv) * (100-(tstatus->int_+tstatus->vit)/2)/100,SCFLAG_NONE);
-			}
-			clif->skill_nodamage(src,bl,skill_id,skill_lv,1);
-			if(dstmd)
-				mob->unlocktarget(dstmd,tick);
+
+			clif->skill_nodamage(src, bl, skill_id, skill_lv, 1);
+
+			if (dstmd != NULL)
+				mob->unlocktarget(dstmd, tick);
+
 			break;
 
 		// Mercenary Supportive Skills
@@ -9433,7 +9459,7 @@ static int skill_castend_nodamage_id(struct block_list *src, struct block_list *
 		case NC_SELFDESTRUCTION:
 			if (sd) {
 				if (pc_ismadogear(sd))
-					 pc->setmadogear(sd, false);
+					 pc->setmadogear(sd, false, MADO_ROBOT);
 				clif->skill_nodamage(src, bl, skill_id, skill_lv, 1);
 				skill->castend_damage_id(src, src, skill_id, skill_lv, tick, flag);
 				status->set_sp(src, 0, STATUS_HEAL_DEFAULT);
@@ -10403,7 +10429,7 @@ static int skill_castend_nodamage_id(struct block_list *src, struct block_list *
 			if(sd) {
 				struct mob_data *summon_md;
 
-				summon_md = mob->once_spawn_sub(src, src->m, src->x, src->y, clif->get_bl_name(src), MOBID_KO_KAGE, "", SZ_SMALL, AI_NONE);
+				summon_md = mob->once_spawn_sub(src, src->m, src->x, src->y, clif->get_bl_name(src), MOBID_KO_KAGE, "", SZ_SMALL, AI_NONE, 0);
 				if( summon_md ) {
 					summon_md->master_id = src->id;
 					summon_md->special_state.ai = AI_ZANZOU;
@@ -10586,7 +10612,7 @@ static int skill_castend_nodamage_id(struct block_list *src, struct block_list *
 
 			for (i = 0; i < summons[skill_lv-1].quantity; i++) {
 				struct mob_data *summon_md = mob->once_spawn_sub(src, src->m, src->x, src->y, clif->get_bl_name(src),
-				                                                 summons[skill_lv-1].mob_id, "", SZ_SMALL, AI_ATTACK);
+				                                                 summons[skill_lv-1].mob_id, "", SZ_SMALL, AI_ATTACK, 0);
 				if (summon_md != NULL) {
 					summon_md->master_id = src->id;
 					if (summon_md->deletetimer != INVALID_TIMER)
@@ -11369,7 +11395,7 @@ static int skill_castend_pos2(struct block_list *src, int x, int y, uint16 skill
 				}
 
 				// Correct info, don't change any of this! [Celest]
-				md = mob->once_spawn_sub(src, src->m, x, y, clif->get_bl_name(src), class_, "", SZ_SMALL, AI_NONE);
+				md = mob->once_spawn_sub(src, src->m, x, y, clif->get_bl_name(src), class_, "", SZ_SMALL, AI_NONE, 0);
 				if (md) {
 					md->master_id = src->id;
 					md->special_state.ai = (skill_id == AM_SPHEREMINE) ? AI_SPHERE : AI_FLORA;
@@ -11471,7 +11497,7 @@ static int skill_castend_pos2(struct block_list *src, int x, int y, uint16 skill
 					clif->skill_fail(sd, skill_id, USESKILL_FAIL_LEVEL, 0, 0);
 				} else {
 					int mob_id = skill_lv < 2 ? MOBID_BLACK_MUSHROOM + rnd()%2 : MOBID_RED_PLANT + rnd()%6;
-					struct mob_data *md = mob->once_spawn_sub(src, src->m, x, y, DEFAULT_MOB_JNAME, mob_id, "", SZ_SMALL, AI_NONE);
+					struct mob_data *md = mob->once_spawn_sub(src, src->m, x, y, DEFAULT_MOB_JNAME, mob_id, "", SZ_SMALL, AI_NONE, 0);
 					int i;
 					if (md == NULL)
 						break;
@@ -11617,7 +11643,7 @@ static int skill_castend_pos2(struct block_list *src, int x, int y, uint16 skill
 
 		case NC_SILVERSNIPER:
 			{
-				struct mob_data *md = mob->once_spawn_sub(src, src->m, x, y, clif->get_bl_name(src), MOBID_SILVERSNIPER, "", SZ_SMALL, AI_NONE);
+				struct mob_data *md = mob->once_spawn_sub(src, src->m, x, y, clif->get_bl_name(src), MOBID_SILVERSNIPER, "", SZ_SMALL, AI_NONE, 0);
 				if (md) {
 					md->master_id = src->id;
 					md->special_state.ai = AI_FLORA;
@@ -13968,6 +13994,22 @@ static bool skill_is_combo(int skill_id)
 	return false;
 }
 
+/**
+ * Checks if a skill is casted by an item (itemskill() script command).
+ *
+ * @param sd The charcater's session data.
+ * @param skill_id The skill's ID.
+ * @param skill_lv The skill's level.
+ * @return true if skill is casted by an item, otherwise false.
+ */
+static bool skill_is_item_skill(struct map_session_data *sd, int skill_id, int skill_lv)
+{
+	nullpo_retr(false, sd);
+
+	return (sd->skillitem == skill_id && sd->skillitemlv == skill_lv
+		&& sd->itemskill_id == skill_id && sd->itemskill_lv == skill_lv);
+}
+
 static int skill_check_condition_castbegin(struct map_session_data *sd, uint16 skill_id, uint16 skill_lv)
 {
 	struct status_data *st;
@@ -13976,8 +14018,16 @@ static int skill_check_condition_castbegin(struct map_session_data *sd, uint16 s
 
 	nullpo_ret(sd);
 
+	if (skill_lv < 1 || skill_lv > MAX_SKILL_LEVEL)
+		return 0;
+
 	if (sd->chat_id != 0)
 		return 0;
+
+	if ((sd->state.itemskill_conditions_checked == 1 || sd->state.itemskill_no_conditions == 1)
+	    && skill->is_item_skill(sd, skill_id, skill_lv)) {
+		return 1;
+	}
 
 	if (pc_has_permission(sd, PC_PERM_SKILL_UNCONDITIONAL) && sd->skillitem != skill_id) {
 		//GMs don't override the skillItem check, otherwise they can use items without them being consumed! [Skotlex]
@@ -14020,24 +14070,21 @@ static int skill_check_condition_castbegin(struct map_session_data *sd, uint16 s
 			if( (i = sd->itemindex) == -1 ||
 				sd->status.inventory[i].nameid != sd->itemid ||
 				sd->inventory_data[i] == NULL ||
-				!sd->inventory_data[i]->flag.delay_consume ||
 				sd->status.inventory[i].amount < 1
 			) {
 				//Something went wrong, item exploit?
 				sd->itemid = sd->itemindex = -1;
 				return 0;
 			}
+
 			//Consume
 			sd->itemid = sd->itemindex = -1;
-			if( skill_id == WZ_EARTHSPIKE && sc && sc->data[SC_EARTHSCROLL] && rnd()%100 > sc->data[SC_EARTHSCROLL]->val2 ) // [marquis007]
-				; //Do not consume item.
-			else if( sd->status.inventory[i].expire_time == 0 ) // Rental usable items are not consumed until expiration
+			if (sd->status.inventory[i].expire_time == 0 && sd->inventory_data[i]->flag.delay_consume == 1) // Rental usable items are not consumed until expiration
 				pc->delitem(sd, i, 1, 0, DELITEM_NORMAL, LOG_TYPE_CONSUME);
 		}
-		return 1;
 	}
 
-	if( pc_is90overweight(sd) ) {
+	if (pc_is90overweight(sd) && sd->skillitem != skill_id) { /// Skill casting items ignore the overweight restriction. [Kenpachi]
 		clif->skill_fail(sd, skill_id, USESKILL_FAIL_WEIGHTOVER, 0, 0);
 		return 0;
 	}
@@ -14160,9 +14207,6 @@ static int skill_check_condition_castbegin(struct map_session_data *sd, uint16 s
 				}
 			}
 	}
-
-	if( skill_lv < 1 || skill_lv > MAX_SKILL_LEVEL )
-		return 0;
 
 	require = skill->get_requirement(sd,skill_id,skill_lv);
 
@@ -14911,7 +14955,7 @@ static int skill_check_condition_castbegin(struct map_session_data *sd, uint16 s
 		return 0;
 	}
 
-	if( require.sp > 0 && st->sp < (unsigned int)require.sp) {
+	if (require.sp > 0 && st->sp < (unsigned int)require.sp && sd->skillitem != skill_id) { /// Skill casting items and Hocus-Pocus skills don't consume SP. [Kenpachi]
 		clif->skill_fail(sd, skill_id, USESKILL_FAIL_SP_INSUFFICIENT, 0, 0);
 		return 0;
 	}
@@ -14969,6 +15013,11 @@ static int skill_check_condition_castend(struct map_session_data *sd, uint16 ski
 	if (sd->chat_id != 0)
 		return 0;
 
+	if ((sd->state.itemskill_conditions_checked == 1 || sd->state.itemskill_no_conditions == 1)
+	    && skill->is_item_skill(sd, skill_id, skill_lv)) {
+		return 1;
+	}
+
 	if( pc_has_permission(sd, PC_PERM_SKILL_UNCONDITIONAL) && sd->skillitem != skill_id ) {
 		//GMs don't override the skillItem check, otherwise they can use items without them being consumed! [Skotlex]
 		sd->state.arrow_atk = skill->get_ammotype(skill_id)?1:0; //Need to do arrow state check.
@@ -14996,14 +15045,8 @@ static int skill_check_condition_castend(struct map_session_data *sd, uint16 ski
 				return 0;
 			break;
 	}
-	/* temporarily disabled, awaiting for kenpachi to detail this so we can make it work properly */
-#if 0
-	if( sd->state.abra_flag ) // Casting finished (Hocus-Pocus)
-		return 1;
-#endif
-	if( sd->skillitem == skill_id )
-		return 1;
-	if( pc_is90overweight(sd) ) {
+
+	if (pc_is90overweight(sd) && sd->skillitem != skill_id) { /// Skill casting items ignore the overweight restriction. [Kenpachi]
 		clif->skill_fail(sd, skill_id, USESKILL_FAIL_WEIGHTOVER, 0, 0);
 		return 0;
 	}
@@ -15176,6 +15219,9 @@ static int skill_consume_requirement(struct map_session_data *sd, uint16 skill_i
 
 	nullpo_ret(sd);
 
+	if (sd->state.itemskill_no_conditions == 1 && skill->is_item_skill(sd, skill_id, skill_lv))
+		return 1;
+
 	req = skill->get_requirement(sd,skill_id,skill_lv);
 
 	if (type&1) {
@@ -15184,9 +15230,15 @@ static int skill_consume_requirement(struct map_session_data *sd, uint16 skill_i
 			case MC_IDENTIFY:
 				req.sp = 0;
 				break;
+			case WZ_EARTHSPIKE:
+				if (sd->sc.count > 0 && sd->sc.data[SC_EARTHSCROLL] != NULL) // If Earth Spike Scroll is used while SC_EARTHSCROLL is active, 10 SP are consumed. [Kenpachi]
+					req.sp = 10;
+
+				break;
 			default:
-				if( sd->state.autocast )
+				if (sd->state.autocast == 1 || sd->skillitem == skill_id) /// Skill casting items and Hocus-Pocus skills don't consume SP. [Kenpachi]
 					req.sp = 0;
+
 				break;
 		}
 
@@ -15264,12 +15316,6 @@ static struct skill_condition skill_get_requirement(struct map_session_data *sd,
 
 	if( !sd )
 		return req;
-#if 0 /* temporarily disabled, awaiting for kenpachi to detail this so we can make it work properly */
-	if( sd->state.abra_flag )
-#else // not 0
-	if( sd->skillitem == skill_id )
-#endif // 0
-		return req; // Hocus-Pocus don't have requirements.
 
 	sc = &sd->sc;
 	if( !sc->count )
@@ -18779,7 +18825,7 @@ static int skill_magicdecoy(struct map_session_data *sd, int nameid)
 		break;
 	}
 
-	md = mob->once_spawn_sub(&sd->bl, sd->bl.m, x, y, sd->status.name, class_, "", SZ_SMALL, AI_NONE);
+	md = mob->once_spawn_sub(&sd->bl, sd->bl.m, x, y, sd->status.name, class_, "", SZ_SMALL, AI_NONE, 0);
 	if( md ) {
 		md->master_id = sd->bl.id;
 		md->special_state.ai = AI_FLORA;
@@ -21581,6 +21627,7 @@ void skill_defaults(void)
 	skill->cast_fix_sc = skill_castfix_sc;
 	skill->vf_cast_fix = skill_vfcastfix;
 	skill->delay_fix = skill_delay_fix;
+	skill->is_item_skill = skill_is_item_skill;
 	skill->check_condition_castbegin = skill_check_condition_castbegin;
 	skill->check_condition_castend = skill_check_condition_castend;
 	skill->consume_requirement = skill_consume_requirement;

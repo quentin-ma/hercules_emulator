@@ -218,7 +218,7 @@
 #define MAX_FAME 1000000000
 #define MAX_CART 100
 #ifndef MAX_SKILL_DB
-#define MAX_SKILL_DB 1510 ///< Maximum number of skills in the skill DB (compacted array size)
+#define MAX_SKILL_DB 1314 ///< Maximum number of skills in the skill DB (compacted array size)
 #endif
 #ifndef MAX_SKILL_ID
 #define MAX_SKILL_ID 10015   // [Ind/Hercules] max used skill ID
@@ -822,8 +822,8 @@ struct party_member {
 	int char_id;
 	char name[NAME_LENGTH];
 	int class;
+	int lv;
 	unsigned short map;
-	unsigned short lv;
 	unsigned leader : 1,
 	         online : 1;
 };

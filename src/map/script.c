@@ -10694,6 +10694,7 @@ static BUILDIN(checkmount)
 /**
  * Mounts or dismounts a combat mount.
  *
+ * setmount <flag>, <mtype>;
  * setmount <flag>;
  * setmount;
  *
@@ -10712,6 +10713,8 @@ static BUILDIN(checkmount)
  * If an invalid value or no flag is specified, the appropriate mount is
  * auto-detected. As a result of this, there is no need to specify a flag at
  * all, unless it is a dragon color other than green.
+ *
+ * In newer clients you can specify the mado gear type though the mtype argument.
  */
 static BUILDIN(setmount)
 {
@@ -10723,6 +10726,12 @@ static BUILDIN(setmount)
 
 	if (script_hasdata(st,2))
 		flag = script_getnum(st,2);
+
+	enum mado_type mtype = script_hasdata(st, 3) ? script_getnum(st, 3) : MADO_ROBOT;
+	if (mtype < MADO_ROBOT || mtype >= MADO_MAX) {
+		ShowError("script_setmount: Invalid mado type has been passed (%d).\n", flag);
+		return false;
+	}
 
 	// Color variants for Rune Knight dragon mounts.
 	if (flag != SETMOUNT_TYPE_NONE) {
@@ -10750,7 +10759,7 @@ static BUILDIN(setmount)
 		} else if ((sd->job & MAPID_THIRDMASK) == MAPID_MECHANIC) {
 			// Mechanic (Mado Gear)
 			if (pc->checkskill(sd, NC_MADOLICENCE))
-				pc->setmadogear(sd, true);
+				pc->setmadogear(sd, true, mtype);
 		} else {
 			// Knight / Crusader (Peco Peco)
 			if (pc->checkskill(sd, KN_RIDING))
@@ -10764,7 +10773,7 @@ static BUILDIN(setmount)
 			pc->setridingwug(sd, false);
 		}
 		if (pc_ismadogear(sd)) {
-			pc->setmadogear(sd, false);
+			pc->setmadogear(sd, false, mtype);
 		}
 		if (pc_isridingpeco(sd)) {
 			pc->setridingpeco(sd, false);
@@ -10976,33 +10985,51 @@ static BUILDIN(guildopenstorage)
 	return true;
 }
 
-/*==========================================
- * Make player use a skill trought item usage
- *------------------------------------------*/
-/// itemskill <skill id>,<level>{,flag
-/// itemskill "<skill name>",<level>{,flag
+/**
+ * Makes the attached character use a skill by using an item.
+ *
+ * @code{.herc}
+ *	itemskill(<skill id>, <skill level>{, <flag>});
+ *	itemskill("<skill name>", <skill level>{, <flag>});
+ * @endcode
+ *
+ */
 static BUILDIN(itemskill)
 {
-	int id;
-	int lv;
 	struct map_session_data *sd = script->rid2sd(st);
+
 	if (sd == NULL || sd->ud.skilltimer != INVALID_TIMER)
 		return true;
 
-	id = ( script_isstringtype(st,2) ? skill->name2id(script_getstr(st,2)) : script_getnum(st,2) );
-	lv = script_getnum(st,3);
-/* temporarily disabled, awaiting for kenpachi to detail this so we can make it work properly */
-#if 0
-	if( !script_hasdata(st, 4) ) {
-		if( !skill->check_condition_castbegin(sd,id,lv) || !skill->check_condition_castend(sd,id,lv) )
+	sd->skillitem = script_isstringtype(st, 2) ? skill->name2id(script_getstr(st, 2)) : script_getnum(st, 2);
+	sd->skillitemlv = script_getnum(st, 3);
+	sd->state.itemskill_conditions_checked = 0; // Skill casting items will check the conditions prior to the target selection in AEGIS. Thus we need a flag to prevent checking them twice.
+
+	int flag = script_hasdata(st, 4) ? script_getnum(st, 4) : ISF_NONE;
+
+	sd->state.itemskill_no_conditions = ((flag & ISF_IGNORECONDITIONS) == ISF_IGNORECONDITIONS) ? 1 : 0; // Unset in pc_itemskill_clear().
+
+	if (sd->state.itemskill_no_conditions == 0) {
+		if (skill->check_condition_castbegin(sd, sd->skillitem, sd->skillitemlv) == 0
+		    || skill->check_condition_castend(sd, sd->skillitem, sd->skillitemlv) == 0) {
 			return true;
+		}
+
+		sd->state.itemskill_conditions_checked = 1; // Unset in pc_itemskill_clear().
 	}
-#endif
-	sd->skillitem=id;
-	sd->skillitemlv=lv;
-	clif->item_skill(sd,id,lv);
+
+	sd->state.itemskill_no_casttime = ((flag & ISF_INSTANTCAST) == ISF_INSTANTCAST) ? 1 : 0; // Unset in pc_itemskill_clear().
+	sd->state.itemskill_castonself = ((flag & ISF_CASTONSELF) == ISF_CASTONSELF) ? 1 : 0; // Unset in pc_itemskill_clear().
+
+	// itemskill_conditions_checked/itemskill_no_conditions/itemskill_no_casttime/itemskill_castonself abuse prevention. Unset in pc_itemskill_clear().
+	sd->itemskill_id = sd->skillitem;
+	sd->itemskill_lv = sd->skillitemlv;
+
+	clif->item_skill(sd, sd->skillitem, sd->skillitemlv);
+
 	return true;
 }
+
 /*==========================================
  * Attempt to create an item
  *------------------------------------------*/
@@ -11775,6 +11802,13 @@ static BUILDIN(getunits)
 		const char *mapname = script_getstr(st, 5);
 		int16 m = map->mapname2mapid(mapname);
 
+		if (m == -1) {
+			ShowError("script:getunits: Invalid map(%s) provided.\n", mapname);
+			script->reportdata(data);
+			st->state = END;
+			return false;
+		}
+
 		if (script_hasdata(st, 9)) {
 			int16 x1 = script_getnum(st, 6);
 			int16 y1 = script_getnum(st, 7);
@@ -12487,6 +12521,56 @@ static BUILDIN(hideonnpc)
 	const char *str;
 	str=script_getstr(st,2);
 	npc->enable(str,4);
+	return true;
+}
+/*==========================================
+ *------------------------------------------*/
+static BUILDIN(cloakonnpc)
+{
+	struct npc_data *nd = npc->name2id(script_getstr(st, 2));
+	if (nd == NULL) {
+		ShowError("buildin_cloakonnpc: invalid npc name '%s'.\n", script_getstr(st, 2));
+		return false;
+	}
+
+	if (script_hasdata(st, 3)) {
+		struct map_session_data *sd = map->id2sd(script_getnum(st, 3));
+		if (sd == NULL)
+			return false;
+
+		uint32 val = nd->option;
+		nd->option |= OPTION_CLOAK;
+		clif->changeoption_target(&nd->bl, &sd->bl, SELF);
+		nd->option = val;
+	} else {
+		nd->option |= OPTION_CLOAK;
+		clif->changeoption(&nd->bl);
+	}
+	return true;
+}
+/*==========================================
+ *------------------------------------------*/
+static BUILDIN(cloakoffnpc)
+{
+	struct npc_data *nd = npc->name2id(script_getstr(st, 2));
+	if (nd == NULL) {
+		ShowError("buildin_cloakoffnpc: invalid npc name '%s'.\n", script_getstr(st, 2));
+		return false;
+	}
+
+	if (script_hasdata(st, 3)) {
+		struct map_session_data *sd = map->id2sd(script_getnum(st, 3));
+		if (sd == NULL)
+			return false;
+
+		uint32 val = nd->option;
+		nd->option &= ~OPTION_CLOAK;
+		clif->changeoption_target(&nd->bl, &sd->bl, SELF);
+		nd->option = val;
+	} else {
+		nd->option &= ~OPTION_CLOAK;
+		clif->changeoption(&nd->bl);
+	}
 	return true;
 }
 
@@ -14526,47 +14610,53 @@ static BUILDIN(strmobinfo)
 	return true;
 }
 
-/*==========================================
- * Summon guardians [Valaris]
- * guardian("<map name>",<x>,<y>,"<name to show>",<mob id>{,"<event label>"}{,<guardian index>}) -> <id>
- *------------------------------------------*/
+/**
+ * Summons a castle guardian mob.
+ *
+ * @code{.herc}
+ *	guardian("<map name>", <x>, <y>, "<name to show>", <mob id>{, <guardian index>});
+ *	guardian("<map name>", <x>, <y>, "<name to show>", <mob id>{, "<event label>"{, <guardian index>}});
+ * @endcode
+ *
+ * @author Valaris
+ *
+ **/
 static BUILDIN(guardian)
 {
-	int class_ = 0, x = 0, y = 0, guardian = 0;
-	const char *str, *mapname, *evt="";
 	bool has_index = false;
+	int guardian = 0;
+	const char *event = "";
 
-	mapname = script_getstr(st,2);
-	x       = script_getnum(st,3);
-	y       = script_getnum(st,4);
-	str     = script_getstr(st,5);
-	class_  = script_getnum(st,6);
-
-	if( script_hasdata(st,8) )
-	{// "<event label>",<guardian index>
-		evt=script_getstr(st,7);
-		guardian=script_getnum(st,8);
+	if (script_hasdata(st, 8)) { /// "<event label>", <guardian index>
+		event = script_getstr(st, 7);
+		script->check_event(st, event);
+		guardian = script_getnum(st, 8);
 		has_index = true;
-	} else if( script_hasdata(st,7) ) {
-		struct script_data *data = script_getdata(st,7);
-		script->get_val(st,data); // Dereference if it's a variable
-		if( data_isstring(data) ) {
-			// "<event label>"
-			evt=script_getstr(st,7);
-		} else if( data_isint(data) ) {
-			// <guardian index>
-			guardian=script_getnum(st,7);
+	} else if (script_hasdata(st, 7)) {
+		struct script_data *data = script_getdata(st, 7);
+
+		script->get_val(st, data); /// Dereference if it's a variable.
+
+		if (data_isstring(data)) { /// "<event label>"
+			event = script_getstr(st, 7);
+			script->check_event(st, event);
+		} else if (data_isint(data)) { /// <guardian index>
+			guardian = script_getnum(st, 7);
 			has_index = true;
 		} else {
-			ShowError("script:guardian: invalid data type for argument #6 (from 1)\n");
+			ShowError("script:guardian: Invalid data type for argument #6!\n");
 			script->reportdata(data);
 			return false;
 		}
 	}
 
-	script->check_event(st, evt);
-	script_pushint(st, mob->spawn_guardian(mapname,x,y,str,class_,evt,guardian,has_index));
+	const char *mapname = script_getstr(st, 2);
+	const char *name = script_getstr(st, 5);
+	const int x = script_getnum(st, 3);
+	const int y = script_getnum(st, 4);
+	const int mob_id = script_getnum(st, 6);
 
+	script_pushint(st, mob->spawn_guardian(mapname, x, y, name, mob_id, event, guardian, has_index, st->oid));
 	return true;
 }
 /*==========================================
@@ -16894,38 +16984,54 @@ static BUILDIN(logmes)
 	return true;
 }
 
+/**
+ * Summons a mob which will act as a slave for the invoking character.
+ *
+ * @code{.herc}
+ *	summon("mob name", <mob id>{, <timeout>{, "event label"}});
+ * @endcode
+ *
+ * @author Celest
+ *
+ **/
 static BUILDIN(summon)
 {
-	int class_, timeout=0;
-	const char *str,*event="";
-	struct mob_data *md;
-	int64 tick = timer->gettick();
 	struct map_session_data *sd = script->rid2sd(st);
+
 	if (sd == NULL)
 		return true;
 
-	str    = script_getstr(st,2);
-	class_ = script_getnum(st,3);
-	if( script_hasdata(st,4) )
-		timeout=script_getnum(st,4);
-	if( script_hasdata(st,5) ) {
-		event=script_getstr(st,5);
+	const int64 tick = timer->gettick();
+
+	clif->skill_poseffect(&sd->bl, AM_CALLHOMUN, 1, sd->bl.x, sd->bl.y, tick);
+
+	const char *event = "";
+
+	if (script_hasdata(st, 5)) {
+		event = script_getstr(st, 5);
 		script->check_event(st, event);
 	}
 
-	clif->skill_poseffect(&sd->bl,AM_CALLHOMUN,1,sd->bl.x,sd->bl.y,tick);
+	const char *name = script_getstr(st, 2);
+	const int mob_id = script_getnum(st, 3);
+	struct mob_data *md = mob->once_spawn_sub(&sd->bl, sd->bl.m, sd->bl.x, sd->bl.y, name, mob_id, event,
+						  SZ_SMALL, AI_NONE, 0);
 
-	md = mob->once_spawn_sub(&sd->bl, sd->bl.m, sd->bl.x, sd->bl.y, str, class_, event, SZ_SMALL, AI_NONE);
-	if (md) {
-		md->master_id=sd->bl.id;
+	if (md != NULL) {
+		md->master_id = sd->bl.id;
 		md->special_state.ai = AI_ATTACK;
-		if( md->deletetimer != INVALID_TIMER )
+
+		if (md->deletetimer != INVALID_TIMER)
 			timer->delete(md->deletetimer, mob->timer_delete);
-		md->deletetimer = timer->add(tick+(timeout>0?timeout*1000:60000),mob->timer_delete,md->bl.id,0);
-		mob->spawn (md); //Now it is ready for spawning.
-		clif->specialeffect(&md->bl,344,AREA);
+
+		const int timeout = script_hasdata(st, 4) ? script_getnum(st, 4) * 1000 : 60000;
+
+		md->deletetimer = timer->add(tick + ((timeout == 0) ? 60000 : timeout), mob->timer_delete, md->bl.id, 0);
+		mob->spawn(md);
+		clif->specialeffect(&md->bl, 344, AREA);
 		sc_start4(NULL, &md->bl, SC_MODECHANGE, 100, 1, 0, MD_AGGRESSIVE, 0, 60000);
 	}
+
 	return true;
 }
 
@@ -22219,6 +22325,23 @@ static BUILDIN(achievement_progress)
 	return true;
 }
 
+static BUILDIN(achievement_iscompleted)
+{
+	struct map_session_data *sd = script_hasdata(st, 3) ? map->id2sd(script_getnum(st, 3)) : script->rid2sd(st);
+	if (sd == NULL)
+		return false;
+
+	int aid = script_getnum(st, 2);
+	const struct achievement_data *ad = achievement->get(aid);
+	if (ad == NULL) {
+		ShowError("buildin_achievement_iscompleted: Invalid Achievement %d provided.\n", aid);
+		return false;
+	}
+
+	script_pushint(st, achievement->check_complete(sd, ad));
+	return true;
+}
+
 /*==========================================
  * BattleGround System
  *------------------------------------------*/
@@ -22340,20 +22463,31 @@ static BUILDIN(bg_warp)
 	return true;
 }
 
+/**
+ * Spawns a mob with allegiance to the given battle group.
+ *
+ * @code{.herc}
+ *	bg_monster(<battle group>, "<map name>", <x>, <y>, "<name to show>", <mob id>{, "<event label>"});
+ * @endcode
+ *
+ **/
 static BUILDIN(bg_monster)
 {
-	int class_ = 0, x = 0, y = 0, bg_id = 0;
-	const char *str, *mapname, *evt="";
+	const char *event = "";
 
-	bg_id   = script_getnum(st,2);
-	mapname = script_getstr(st,3);
-	x       = script_getnum(st,4);
-	y       = script_getnum(st,5);
-	str     = script_getstr(st,6);
-	class_  = script_getnum(st,7);
-	if( script_hasdata(st,8) ) evt = script_getstr(st,8);
-	script->check_event(st, evt);
-	script_pushint(st, mob->spawn_bg(mapname,x,y,str,class_,evt,bg_id));
+	if (script_hasdata(st, 8)) {
+		event = script_getstr(st, 8);
+		script->check_event(st, event);
+	}
+
+	const char *mapname = script_getstr(st, 3);
+	const char *name = script_getstr(st, 6);
+	const int bg_id = script_getnum(st, 2);
+	const int x = script_getnum(st, 4);
+	const int y = script_getnum(st, 5);
+	const int mob_id = script_getnum(st, 7);
+
+	script_pushint(st, mob->spawn_bg(mapname, x, y, name, mob_id, event, bg_id, st->oid));
 	return true;
 }
 
@@ -24677,6 +24811,133 @@ static BUILDIN(openshop)
 	return true;
 }
 
+static bool script_sellitemcurrency_add(struct npc_data *nd, struct script_state* st, int argIndex)
+{
+	nullpo_retr(false, nd);
+	nullpo_retr(false, st);
+
+	if (!script_hasdata(st, argIndex + 1))
+		return false;
+
+	int id = script_getnum(st, argIndex);
+	struct item_data *it;
+	if (!(it = itemdb->exists(id))) {
+		ShowWarning("buildin_sellitemcurrency: unknown item id '%d'!\n", id);
+		return false;
+	}
+	int qty = 0;
+	if ((qty = script_getnum(st, argIndex + 1)) <= 0) {
+		ShowError("buildin_sellitemcurrency: invalid 'qty'!\n");
+		return false;
+	}
+	int refine_level = -1;
+	if (script_hasdata(st, argIndex + 2)) {
+		refine_level = script_getnum(st, argIndex + 2);
+	}
+	int items = nd->u.scr.shop->items;
+	if (nd->u.scr.shop == NULL || items == 0) {
+		ShowWarning("buildin_sellitemcurrency: shop not have items!\n");
+		return false;
+	}
+	if (nd->u.scr.shop->shop_last_index >= items || nd->u.scr.shop->shop_last_index < 0) {
+		ShowWarning("buildin_sellitemcurrency: wrong selected shop index!\n");
+		return false;
+	}
+
+	struct npc_item_list *item_list = &nd->u.scr.shop->item[nd->u.scr.shop->shop_last_index];
+	int index = item_list->value2;
+	if (item_list->currency == NULL) {
+		CREATE(item_list->currency, struct npc_barter_currency, 1);
+		item_list->value2 ++;
+	} else {
+		RECREATE(item_list->currency, struct npc_barter_currency, ++item_list->value2);
+	}
+	struct npc_barter_currency *currency = &item_list->currency[index];
+	currency->nameid = id;
+	currency->refine = refine_level;
+	currency->amount = qty;
+	return true;
+}
+
+/**
+ * @call sellitemcurrency <Item_ID>,qty{,refine}};
+ *
+ * adds <Item_ID> to last item in expanded barter shop
+ **/
+static BUILDIN(sellitemcurrency)
+{
+	struct npc_data *nd;
+	if ((nd = map->id2nd(st->oid)) == NULL) {
+		ShowWarning("buildin_sellitemcurrency: trying to run without a proper NPC!\n");
+		return false;
+	}
+	if (nd->u.scr.shop == NULL || nd->u.scr.shop->type != NST_EXPANDED_BARTER) {
+		ShowWarning("buildin_sellitemcurrency: this command can be used only with expanded barter shops!\n");
+		return false;
+	}
+
+	script->sellitemcurrency_add(nd, st, 2);
+	return true;
+}
+
+/**
+ * @call endsellitem;
+ *
+ * complete sell item in expanded barter shop (NST_EXPANDED_BARTER)
+ **/
+static BUILDIN(endsellitem)
+{
+	struct npc_data *nd;
+	if ((nd = map->id2nd(st->oid)) == NULL) {
+		ShowWarning("buildin_endsellitem: trying to run without a proper NPC!\n");
+		return false;
+	}
+	if (nd->u.scr.shop == NULL || nd->u.scr.shop->type != NST_EXPANDED_BARTER) {
+		ShowWarning("buildin_endsellitem: this command can be used only with expanded barter shops!\n");
+		return false;
+	}
+
+	int newIndex = nd->u.scr.shop->shop_last_index;
+	const struct npc_item_list *const newItem = &nd->u.scr.shop->item[newIndex];
+	int i = 0;
+	for (i = 0; i < nd->u.scr.shop->items - 1; i++) {
+		const struct npc_item_list *const item = &nd->u.scr.shop->item[i];
+		if (item->nameid != newItem->nameid || item->value != newItem->value)
+			continue;
+		if (item->value2 != newItem->value2)
+			continue;
+		bool found = true;
+		for (int k = 0; k < item->value2; k ++) {
+			struct npc_barter_currency *currency = &item->currency[k];
+			struct npc_barter_currency *newCurrency = &newItem->currency[k];
+			if (currency->nameid != newCurrency->nameid ||
+			    currency->amount != newCurrency->amount ||
+			    currency->refine != newCurrency->refine) {
+				found = false;
+				break;
+			}
+		}
+		if (!found)
+			continue;
+		break;
+	}
+
+	if (i != nd->u.scr.shop->items - 1) {
+		if (nd->u.scr.shop->item[i].qty != -1) {
+			nd->u.scr.shop->item[i].qty += nd->u.scr.shop->item[newIndex].qty;
+			npc->expanded_barter_tosql(nd, i);
+		}
+		nd->u.scr.shop->shop_last_index --;
+		nd->u.scr.shop->items--;
+		if (nd->u.scr.shop->item[newIndex].currency != NULL) {
+			aFree(nd->u.scr.shop->item[newIndex].currency);
+			nd->u.scr.shop->item[newIndex].currency = NULL;
+		}
+	}
+
+	return true;
+}
+
 /**
  * @call sellitem <Item_ID>,{,price{,qty}};
  *
@@ -24700,29 +24961,64 @@ static BUILDIN(sellitem)
 		return false;
 	}
 
-	if (!nd->u.scr.shop) {
+	const bool have_shop = (nd->u.scr.shop != NULL);
+	if (!have_shop) {
 		npc->trader_update(nd->src_id ? nd->src_id : nd->bl.id);
-		if (nd->u.scr.shop->type == NST_BARTER) {
-			if (!script_hasdata(st, 5)) {
-				ShowError("buildin_sellitem: invalid number of parameters for barter-type shop!\n");
-				return false;
-			}
-			value = script_getnum(st, 4);
-			value2 = script_getnum(st, 5);
+	}
+
+	if (nd->u.scr.shop->type != NST_BARTER) {
+		value = script_hasdata(st, 3) ? script_getnum(st, 3) : it->value_buy;
+		if (value == -1)
+			value = it->value_buy;
+	}
+
+	if (nd->u.scr.shop->type == NST_BARTER) {
+		if (!script_hasdata(st, 5)) {
+			ShowError("buildin_sellitem: invalid number of parameters for barter-type shop!\n");
+			return false;
 		}
-	} else {/* no need to run this if its empty */
+		value = script_getnum(st, 4);
+		value2 = script_getnum(st, 5);
+	} else if (nd->u.scr.shop->type == NST_EXPANDED_BARTER) {
+		if (!script_hasdata(st, 4)) {
+			ShowError("buildin_sellitem: invalid number of parameters for expanded barter type shop!\n");
+			return false;
+		}
+		if ((qty = script_getnum(st, 4)) <= 0 && qty != -1) {
+			ShowError("buildin_sellitem: invalid 'qty' for expanded barter type shop!\n");
+			return false;
+		}
+	}
+
+	if (have_shop) {
 		if (nd->u.scr.shop->type == NST_BARTER) {
-			if (!script_hasdata(st, 5)) {
-				ShowError("buildin_sellitem: invalid number of parameters for barter-type shop!\n");
-				return false;
-			}
-			value = script_getnum(st, 4);
-			value2 = script_getnum(st, 5);
 			for (i = 0; i < nd->u.scr.shop->items; i++) {
 				const struct npc_item_list *const item = &nd->u.scr.shop->item[i];
 				if (item->nameid == id && item->value == value && item->value2 == value2) {
 					break;
 				}
+			}
+		} else if (nd->u.scr.shop->type == NST_EXPANDED_BARTER) {
+			for (i = 0; i < nd->u.scr.shop->items; i++) {
+				const struct npc_item_list *const item = &nd->u.scr.shop->item[i];
+				if (item->nameid != id || item->value != value)
+					continue;
+				if (item->value2 != (script_lastdata(st) - 4) / 3)
+					continue;
+				bool found = true;
+				for (int k = 0; k < item->value2; k ++) {
+					const int scriptOffset = k * 3 + 5;
+					struct npc_barter_currency *currency = &item->currency[k];
+					if (currency->nameid != script_getnum(st, scriptOffset) ||
+					    currency->amount != script_getnum(st, scriptOffset + 1) ||
+					    currency->refine != script_getnum(st, scriptOffset + 2)) {
+						found = false;
+						break;
+					}
+				}
+				if (!found)
+					continue;
+				break;
 			}
 		} else {
 			for (i = 0; i < nd->u.scr.shop->items; i++) {
@@ -24731,12 +25027,6 @@ static BUILDIN(sellitem)
 				}
 			}
 		}
-	}
-
-	if (nd->u.scr.shop->type != NST_BARTER) {
-		value = script_hasdata(st,3) ? script_getnum(st, 3) : it->value_buy;
-		if( value == -1 )
-			value = it->value_buy;
 	}
 
 	if( nd->u.scr.shop->type == NST_MARKET ) {
@@ -24759,7 +25049,8 @@ static BUILDIN(sellitem)
 		}
 	}
 
-	if (i != nd->u.scr.shop->items) {
+	bool foundInShop = (i != nd->u.scr.shop->items);
+	if (foundInShop) {
 		nd->u.scr.shop->item[i].value = value;
 		nd->u.scr.shop->item[i].qty   = qty;
 		if (nd->u.scr.shop->type == NST_MARKET) /* has been manually updated, make it reflect on sql */
@@ -24785,8 +25076,84 @@ static BUILDIN(sellitem)
 		nd->u.scr.shop->item[i].value  = value;
 		nd->u.scr.shop->item[i].value2 = value2;
 		nd->u.scr.shop->item[i].qty    = qty;
+		nd->u.scr.shop->item[i].currency = NULL;
+	}
+	nd->u.scr.shop->shop_last_index = i;
+
+	if (!foundInShop) {
+		for (int k = 5; k <= script_lastdata(st); k += 3) {
+			script->sellitemcurrency_add(nd, st, k);
+		}
 	}
 
+	if (foundInShop) {
+		if (nd->u.scr.shop->type == NST_EXPANDED_BARTER) {  /* has been manually updated, make it reflect on sql */
+			npc->expanded_barter_tosql(nd, i);
+		}
+	}
+	return true;
+}
+
+/**
+ * @call startsellitem <Item_ID>,{,price{,qty}};
+ *
+ * Starts adding item into expanded barter shop (NST_EXPANDED_BARTER)
+ **/
+static BUILDIN(startsellitem)
+{
+	struct npc_data *nd;
+	struct item_data *it;
+	int i = 0, id = script_getnum(st,2);
+	int value2 = 0;
+	int qty = 0;
+
+	if (!(nd = map->id2nd(st->oid))) {
+		ShowWarning("buildin_startsellitem: trying to run without a proper NPC!\n");
+		return false;
+	} else if (!(it = itemdb->exists(id))) {
+		ShowWarning("buildin_startsellitem: unknown item id '%d'!\n", id);
+		return false;
+	}
+
+	const bool have_shop = (nd->u.scr.shop != NULL);
+	if (!have_shop) {
+		npc->trader_update(nd->src_id ? nd->src_id : nd->bl.id);
+	}
+
+	if (nd->u.scr.shop->type != NST_EXPANDED_BARTER) {
+		ShowWarning("script_startsellitem: can works only for NST_EXPANDED_BARTER shops");
+		return false;
+	}
+
+	int value = script_hasdata(st, 3) ? script_getnum(st, 3) : it->value_buy;
+	if (value == -1)
+		value = it->value_buy;
+
+	if ((qty = script_getnum(st, 4)) <= 0 && qty != -1) {
+		ShowError("buildin_startsellitem: invalid 'qty' for expanded barter type shop!\n");
+		return false;
+	}
+
+	for (i = 0; i < nd->u.scr.shop->items; i++) {
+		if (nd->u.scr.shop->item[i].nameid == 0)
+			break;
+	}
+
+	if (i == nd->u.scr.shop->items) {
+		if (nd->u.scr.shop->items == USHRT_MAX) {
+			ShowWarning("buildin_startsellitem: Can't add %s (%s/%s), shop list is full!\n", it->name, nd->exname, nd->path);
+			return false;
+		}
+		i = nd->u.scr.shop->items;
+		RECREATE(nd->u.scr.shop->item, struct npc_item_list, ++nd->u.scr.shop->items);
+	}
+
+	nd->u.scr.shop->item[i].nameid = it->nameid;
+	nd->u.scr.shop->item[i].value  = value;
+	nd->u.scr.shop->item[i].value2 = value2;
+	nd->u.scr.shop->item[i].qty    = qty;
+	nd->u.scr.shop->item[i].currency = NULL;
+	nd->u.scr.shop->shop_last_index = i;
 	return true;
 }
 
@@ -24820,6 +25187,18 @@ static BUILDIN(stopselling)
 				break;
 			}
 		}
+	} else if (nd->u.scr.shop->type == NST_EXPANDED_BARTER) {
+		if (!script_hasdata(st, 3)) {
+			ShowError("buildin_stopselling: called with wrong number of arguments\n");
+			return false;
+		}
+		const int price = script_getnum(st, 3);
+		for (i = 0; i < nd->u.scr.shop->items; i++) {
+			const struct npc_item_list *const item = &nd->u.scr.shop->item[i];
+			if (item->nameid == id && item->value == price) {
+				break;
+			}
+		}
 	} else {
 		for (i = 0; i < nd->u.scr.shop->items; i++) {
 			if (nd->u.scr.shop->item[i].nameid == id) {
@@ -24833,13 +25212,19 @@ static BUILDIN(stopselling)
 
 		if (nd->u.scr.shop->type == NST_MARKET)
 			npc->market_delfromsql(nd, i);
-		if (nd->u.scr.shop->type == NST_BARTER)
+		else if (nd->u.scr.shop->type == NST_BARTER)
 			npc->barter_delfromsql(nd, i);
+		else if (nd->u.scr.shop->type == NST_EXPANDED_BARTER)
+			npc->expanded_barter_delfromsql(nd, i);
 
 		nd->u.scr.shop->item[i].nameid = 0;
 		nd->u.scr.shop->item[i].value  = 0;
 		nd->u.scr.shop->item[i].value2 = 0;
 		nd->u.scr.shop->item[i].qty    = 0;
+		if (nd->u.scr.shop->item[i].currency != NULL) {
+			aFree(nd->u.scr.shop->item[i].currency);
+			nd->u.scr.shop->item[i].currency = NULL;
+		}
 
 		for (i = 0, cursor = 0; i < nd->u.scr.shop->items; i++) {
 			if (nd->u.scr.shop->item[i].nameid == 0)
@@ -24850,14 +25235,18 @@ static BUILDIN(stopselling)
 				nd->u.scr.shop->item[cursor].value  = nd->u.scr.shop->item[i].value;
 				nd->u.scr.shop->item[cursor].value2 = nd->u.scr.shop->item[i].value2;
 				nd->u.scr.shop->item[cursor].qty    = nd->u.scr.shop->item[i].qty;
+				nd->u.scr.shop->item[cursor].currency = nd->u.scr.shop->item[i].currency;
 			}
 
 			cursor++;
 		}
 
+		nd->u.scr.shop->items--;
+		nd->u.scr.shop->item[nd->u.scr.shop->items].currency = NULL;
 		script_pushint(st, 1);
-	} else
+	} else {
 		script_pushint(st, 0);
+	}
 
 	return true;
 }
@@ -24916,6 +25305,7 @@ static BUILDIN(tradertype)
 		}
 		npc->market_delfromsql(nd, INT_MAX);
 		npc->barter_delfromsql(nd, INT_MAX);
+		npc->expanded_barter_delfromsql(nd, INT_MAX);
 	}
 
 #if PACKETVER < 20131223
@@ -24927,6 +25317,12 @@ static BUILDIN(tradertype)
 #if PACKETVER_MAIN_NUM < 20190116 && PACKETVER_RE_NUM < 20190116 && PACKETVER_ZERO_NUM < 20181226
 	if (type == NST_BARTER) {
 		ShowWarning("buildin_tradertype: NST_BARTER is only available with PACKETVER_ZERO_NUM 20181226 or PACKETVER_MAIN_NUM 20190116 or PACKETVER_RE_NUM 20190116 or newer!\n");
+		script->reportsrc(st);
+	}
+#endif
+#if PACKETVER_MAIN_NUM < 20191120 && PACKETVER_RE_NUM < 20191106 && PACKETVER_ZERO_NUM < 20191127
+	if (type == NST_EXPANDED_BARTER) {
+		ShowWarning("buildin_tradertype: NST_EXPANDED_BARTER is only available with PACKETVER_ZERO_NUM 20191127 or PACKETVER_MAIN_NUM 20191120 or PACKETVER_RE_NUM 20191106 or newer!\n");
 		script->reportsrc(st);
 	}
 #endif
@@ -24973,8 +25369,8 @@ static BUILDIN(shopcount)
 	} else if ( !nd->u.scr.shop || !nd->u.scr.shop->items ) {
 		ShowWarning("buildin_shopcount(%d): trying to use without any items!\n",id);
 		return false;
-	} else if (nd->u.scr.shop->type != NST_MARKET && nd->u.scr.shop->type != NST_BARTER) {
-		ShowWarning("buildin_shopcount(%d): trying to use on a non-NST_MARKET and non-NST_BARTER shop!\n",id);
+	} else if (nd->u.scr.shop->type != NST_MARKET && nd->u.scr.shop->type != NST_BARTER && nd->u.scr.shop->type != NST_EXPANDED_BARTER) {
+		ShowWarning("buildin_shopcount(%d): trying to use on a non-NST_MARKET and non-NST_BARTER and non-NST_EXPANDED_BARTER shop!\n",id);
 		return false;
 	}
 
@@ -26363,7 +26759,7 @@ static void script_parse_builtin(void)
 		BUILDIN_DEF(checkcart,""),
 		BUILDIN_DEF(setfalcon,"?"),
 		BUILDIN_DEF(checkfalcon,""),
-		BUILDIN_DEF(setmount,"?"),
+		BUILDIN_DEF(setmount,"??"),
 		BUILDIN_DEF(checkmount,""),
 		BUILDIN_DEF(checkwug,""),
 		BUILDIN_DEF(savepoint,"sii"),
@@ -26410,6 +26806,8 @@ static void script_parse_builtin(void)
 		BUILDIN_DEF(disablenpc,"s"),
 		BUILDIN_DEF(hideoffnpc,"s"),
 		BUILDIN_DEF(hideonnpc,"s"),
+		BUILDIN_DEF(cloakonnpc,"s?"),
+		BUILDIN_DEF(cloakoffnpc,"s?"),
 		BUILDIN_DEF(sc_start,"iii???"),
 		BUILDIN_DEF2(sc_start,"sc_start2","iiii???"),
 		BUILDIN_DEF2(sc_start,"sc_start4","iiiiii???"),
@@ -26692,6 +27090,7 @@ static void script_parse_builtin(void)
 		BUILDIN_DEF(agitcheck2,""),
 		// Achievements [Smokexyz/Hercules]
 		BUILDIN_DEF(achievement_progress, "iiii?"),
+		BUILDIN_DEF(achievement_iscompleted, "i?"),
 		// BattleGround
 		BUILDIN_DEF(waitingroom2bg,"siiss?"),
 		BUILDIN_DEF(waitingroom2bg_single,"isiis"),
@@ -26803,7 +27202,10 @@ static void script_parse_builtin(void)
 
 		/* New Shop Support */
 		BUILDIN_DEF(openshop,"?"),
-		BUILDIN_DEF(sellitem,"i???"),
+		BUILDIN_DEF(sellitem, "i???*"),
+		BUILDIN_DEF(sellitemcurrency, "ii?"),
+		BUILDIN_DEF(startsellitem, "iii"),
+		BUILDIN_DEF(endsellitem, ""),
 		BUILDIN_DEF(stopselling,"i??"),
 		BUILDIN_DEF(setcurrency,"i?"),
 		BUILDIN_DEF(tradertype,"i"),
@@ -27364,6 +27766,7 @@ static void script_hardcoded_constants(void)
 	script->set_constant("NST_MARKET", NST_MARKET, false, false);
 	script->set_constant("NST_CUSTOM", NST_CUSTOM, false, false);
 	script->set_constant("NST_BARTER", NST_BARTER, false, false);
+	script->set_constant("NST_EXPANDED_BARTER", NST_EXPANDED_BARTER, false, false);
 
 	script->constdb_comment("script unit data types");
 	script->set_constant("UDT_TYPE", UDT_TYPE, false, false);
@@ -27448,6 +27851,16 @@ static void script_hardcoded_constants(void)
 	script->set_constant("GUILDINFO_SKILL_POINTS", GUILDINFO_SKILL_POINTS, false, false);
 	script->set_constant("GUILDINFO_MASTER_NAME", GUILDINFO_MASTER_NAME, false, false);
 	script->set_constant("GUILDINFO_MASTER_CID", GUILDINFO_MASTER_CID, false, false);
+
+	script->constdb_comment("madogear types");
+	script->set_constant("MADO_ROBOT", MADO_ROBOT, false, false);
+	script->set_constant("MADO_SUITE", MADO_SUITE, false, false);
+
+	script->constdb_comment("itemskill option flags");
+	script->set_constant("ISF_NONE", ISF_NONE, false, false);
+	script->set_constant("ISF_IGNORECONDITIONS", ISF_IGNORECONDITIONS, false, false);
+	script->set_constant("ISF_INSTANTCAST", ISF_INSTANTCAST, false, false);
+	script->set_constant("ISF_CASTONSELF", ISF_CASTONSELF, false, false);
 
 	script->constdb_comment("Renewal");
 #ifdef RENEWAL
@@ -27812,4 +28225,6 @@ void script_defaults(void)
 	script->run_item_rental_start_script = script_run_item_rental_start_script;
 	script->run_item_rental_end_script = script_run_item_rental_end_script;
 	script->run_item_lapineddukddak_script = script_run_item_lapineddukddak_script;
+
+	script->sellitemcurrency_add = script_sellitemcurrency_add;
 }

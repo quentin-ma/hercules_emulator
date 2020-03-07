@@ -324,11 +324,13 @@ The types that a trader object can have are the following:
 		    and need to be refurbished)
 - NST_CUSTOM	(3) Custom Shop (any currency, item/var/etca, check sample)
 - NST_BARTER	(4) Barter Shop (each item with own item currency)
+- NST_EXPANDED_BARTER	(5) Expanded Barter Shop (buy items and spend zeny and items)
 Unless otherwise specified via *tradertype an trader object will be defined as
 NST_ZENY.
 
 Note: NST_MARKET is only available with PACKETVER 20131223 or newer.
-Note: NST_BARTER is only available with PACKETVER 20181226 zero or newer.
+Note: NST_BARTER is only available with PACKETVER 20190116 main or 20190116 RE or 20181226 zero or newer.
+Note: NST_EXPANDED_BARTER is only available with PACKETVER 20190904 main or 20190904 RE or 20190828 zero or newer.
 See '12 - NPC Trader-Related Commands' and /doc/sample/npc_trader_sample.txt for
 more information regarding how to use this NPC type.
 
@@ -1031,6 +1033,11 @@ execute when the map server connects to a char server, OnInterIfInitOnce
 will only execute once and will not execute if the map server reconnects
 to the char server later. Note that all those events will be executed upon
 scripts reloading.
+
+OnNPCUnload:
+
+OnNPCUnload will be executed when a NPC is unloaded.
+OnNPCUnload is called when @reloadscript, @reloadnpc, @unloadnpc or @unloadnpcfile is used.
 
 OnAgitStart:
 OnAgitEnd:
@@ -4378,7 +4385,7 @@ falcon and false if they don't.
 
 ---------------------------------------
 
-*setmount({<flag>})
+*setmount({<flag>{, <type>}})
 *checkmount()
 
 If <flag> is MOUNT_NONE this command will remove the mount from the
@@ -4413,6 +4420,12 @@ The following flag values are accepted:
 
 Unlike 'setfalcon' and 'setcart' this will not work at all if they aren't of a
 class which can ride a mount.
+
+For clients PACKETVER_MAIN_NUM >= 20191120 || PACKETVER_RE_NUM >= 20191106
+you can pass a <type> flag which specifies the madogear wanted.
+The Available types:
+	MADO_ROBOT
+	MADO_SUITE
 
 The accompanying function will return MOUNT_NONE if the invoking
 character is not on a mount, and a non-zero value (according to the
@@ -5638,20 +5651,37 @@ set with 'disable_items'.
 
 ---------------------------------------
 
-*itemskill(<skill id>, <skill level>, {flag})
-*itemskill("<skill name>", <skill level>, {flag})
+*itemskill(<skill id>, <skill level>{, <flag>})
+*itemskill("<skill name>", <skill level>{, <flag>})
 
 This command meant for item scripts to replicate single-use skills in
 usable items. It will not work properly if there is a visible dialog
 window or menu.
 If the skill is self or auto-targeting, it will be used immediately.
 Otherwise, a target cursor is shown.
-Flag is a optional param and, when present, the command will not check for
-skill requirements.
+Optional value <flag> is a bitmask to manipulate how the skill is casted.
+Since <flag> is a bitmask, the flags can be summed up.
+Possible flags are:
+ - 0x00 - ISF_NONE		- Skill is casted as if has been used from skill tree.
+				  (Same like <flag> was omitted.)
+ - 0x01 - ISF_IGNORECONDITIONS	- Skill requirements are ignored and not consumed
+ - 0x02 - ISF_INSTANTCAST	- Skill is casted instantaneously.
+ - 0x04 - ISF_CASTONSELF	- Skill is forcefully casted on invoking character,
+				  without showing the target selection cursor.
+
+Important: Items which use itemskill() should be of type IT_USABLE.
+           If the item type is IT_DELAYCONSUME and ISF_IGNORECONDITIONS is set,
+           the item won't be consumed when using the item!
 
 // When Anodyne is used, it will cast Endure, Level 1, as if the actual skill
 // has been used from skill tree.
 	itemskill(SM_ENDURE, 1);
+
+// Instantaneously cast Level 10 Increase Agility on invoking character,
+// without checking/consuming skill requirements.
+	itemskill(AL_INCAGI, 10, ISF_IGNORECONDITIONS | ISF_INSTANTCAST | ISF_CASTONSELF);
+// Instaed of using the constants, one could also do it like this:
+	itemskill(AL_INCAGI, 10, 7);
 
 ---------------------------------------
 
@@ -7036,6 +7066,18 @@ As they are now, these commands are pointless, it is suggested to use
 NPC sprite location and other accompanying data from memory when it is not
 used. However, you can use these for some quest ideas (such as cloaking
 NPCs talking while hidden then revealing... you can wonder around =P).
+
+---------------------------------------
+
+*cloakonnpc("<NPC object name>"{, <account_id>})
+*cloakoffnpc("<NPC object name>"{, <account_id>})
+
+These commands are used to apply the cloaking effect on npcs
+this is a visual effect only and it does NOT stop the player
+from interacting with the npc.
+
+If an account_id is specified then the effect will only display to the given id,
+otherwise it's displayed to the entire npc area.
 
 ---------------------------------------
 
@@ -10290,6 +10332,7 @@ when the optional NPC_Name param is used.
 
 *sellitem(<Item_ID>{, <price>{, <qty>}})
 *sellitem(<Item_ID>, <qty>, <currency_id>, <currency_amount>)
+*sellitem(<Item_ID>, <zeny>, <qty>{, <currency_id1>, <currency_amount1>{, <currency_refine1>}{, ...}})
 
 adds (or modifies) <Item_ID> data to the shop,
 when <price> is not provided (or when it is -1) itemdb default is used.
@@ -10298,7 +10341,37 @@ qty is only necessary for NST_MARKET trader types.
 when <Item_ID> is already in the shop,
 the previous data (price/qty), is overwritten with the new.
 
-currency_id and currency_amount can be used only with shop type NST_BARTER
+currency_id and currency_amount can be used only with shop type NST_BARTER.
+zeny, currency_id1, currency_amount1, currency_refine1, can be used only with
+shop type NST_EXPANDED_BARTER.
+
+---------------------------------------
+
+*startsellitem(<Item_ID>, <zeny>, <qty>)
+
+Starts adding item into expanded barter shop (NST_EXPANDED_BARTER).
+Before this command possible to use commands *sellitemcurrency.
+Need PACKETVER 20190904 main or 20190904 RE or 20190828 zero or newer.
+
+Alternative way for add item to expanded barter shop is *sellitem with
+currency parameters.
+
+---------------------------------------
+
+*sellitemcurrency(<Item_ID>, <qty>{, <refine>})
+
+adds <Item_ID> as currency into expanded barter shop (NST_EXPANDED_BARTER)
+If <refine> set to -1, mean for any refine level.
+if <refine> missing used value -1.
+
+Need PACKETVER 20190904 main or 20190904 RE or 20190828 zero or newer.
+
+---------------------------------------
+
+*endsellitem()
+
+Complete adding item into expanded barter shop (NST_EXPANDED_BARTER).
+Need PACKETVER 20190904 main or 20190904 RE or 20190828 zero or newer.
 
 ---------------------------------------
 
@@ -10586,6 +10659,14 @@ incremental - (boolean) true to add the progress towards the goal,
 account_id  - (optional) AID to perform on (default to attached player).
 
 returns progress on success and false on failure
+
+---------------------------------------
+
+*achievement_iscompleted(<ach_id>{, <account_id>})
+
+Checks whether the attached player have completed all the given achievement objectives.
+
+returns true if yes and false if no.
 
 ---------------------------------------
 

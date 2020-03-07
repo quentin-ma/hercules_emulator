@@ -4212,12 +4212,19 @@ ACMD(mount_peco)
 		return true;
 	}
 	if ((sd->job & MAPID_THIRDMASK) == MAPID_MECHANIC) {
+		int mtype = MADO_ROBOT;
+		if (!*message)
+			sscanf(message, "%d", &mtype);
+		if (mtype < MADO_ROBOT || mtype >= MADO_MAX) {
+			clif->message(fd, msg_fd(fd, 173)); // Please enter a valid madogear type.
+			return false;
+		}
 		if (!pc_ismadogear(sd)) {
 			clif->message(sd->fd,msg_fd(fd,1123)); // You have mounted your Mado Gear.
-			pc->setmadogear(sd, true);
+			pc->setmadogear(sd, true, (enum mado_type)mtype);
 		} else {
 			clif->message(sd->fd,msg_fd(fd,1124)); // You have released your Mado Gear.
-			pc->setmadogear(sd, false);
+			pc->setmadogear(sd, false, (enum mado_type)mtype);
 		}
 		return true;
 	}
@@ -4483,59 +4490,90 @@ ACMD(loadnpc)
 	return true;
 }
 
+/**
+ * Unloads a specific NPC.
+ *
+ * @code{.herc}
+ *	@unloadnpc <NPC_name> {<flag>}
+ * @endcode
+ *
+ **/
 ACMD(unloadnpc)
 {
-	struct npc_data *nd;
-	char NPCname[NAME_LENGTH+1];
+	char npc_name[NAME_LENGTH + 1] = {'\0'};
+	int flag = 1;
 
-	memset(NPCname, '\0', sizeof(NPCname));
-
-	if (!*message || sscanf(message, "%24[^\n]", NPCname) < 1) {
-		clif->message(fd, msg_fd(fd,1133)); // Please enter a NPC name (usage: @npcoff <NPC_name>).
+	if (*message == '\0' || sscanf(message, "%24s %1d", npc_name, &flag) < 1) {
+		clif->message(fd, msg_fd(fd, 1133)); /// Please enter a NPC name (Usage: @unloadnpc <NPC_name> {<flag>}).
+		return false;
+	}
+	
+	struct npc_data *nd = npc->name2id(npc_name);
+	
+	if (nd == NULL) {
+		clif->message(fd, msg_fd(fd, 111)); /// This NPC doesn't exist.
 		return false;
 	}
 
-	if ((nd = npc->name2id(NPCname)) == NULL) {
-		clif->message(fd, msg_fd(fd,111)); // This NPC doesn't exist.
-		return false;
-	}
-
-	npc->unload_duplicates(nd);
-	npc->unload(nd,true);
+	npc->unload_duplicates(nd, (flag != 0));
+	npc->unload(nd, true, (flag != 0));
 	npc->read_event_script();
-	clif->message(fd, msg_fd(fd,112)); // Npc Disabled.
+	clif->message(fd, msg_fd(fd, 112)); /// Npc Disabled.
 	return true;
 }
 
-/// Unload existing NPC within the NPC file and reload it.
-/// Usage: @reloadnpc npc/sample_npc.txt
+/**
+ * Unloads a script file and reloads it.
+ * Note: Be aware that some changes made by NPC are not reverted on unload. See doc/atcommands.txt for details.
+ *
+ * @code{.herc}
+ *	@reloadnpc <path> {<flag>}
+ * @endcode
+ *
+ **/
 ACMD(reloadnpc)
 {
-	if (!*message) {
-		clif->message(fd, msg_fd(fd, 1385)); // Usage: @unloadnpcfile <file name>
-		return false;
-	} else if (npc->unloadfile(message) == true) {
-		clif->message(fd, msg_fd(fd, 1386)); // File unloaded. Be aware that mapflags and monsters spawned directly are not removed.
+	char format[20];
 
-		FILE *fp = fopen(message, "r");
-		// check if script file exists
-		if (fp == NULL) {
-			clif->message(fd, msg_fd(fd, 261));
-			return false;
-		}
-		fclose(fp);
+	snprintf(format, sizeof(format), "%%%ds %%1d", MAX_DIR_PATH);
 
-		// add to list of script sources and run it
-		npc->addsrcfile(message);
-		npc->parsesrcfile(message, true);
-		npc->read_event_script();
+	char file_path[MAX_DIR_PATH + 1] = {'\0'};
+	int flag = 1;
 
-		clif->message(fd, msg_fd(fd, 262));
-	} else {
-		clif->message(fd, msg_fd(fd, 1387)); // File not found.
+	if (*message == '\0' || (sscanf(message, format, file_path, &flag) < 1)) {
+		clif->message(fd, msg_fd(fd, 1516)); /// Usage: @reloadnpc <path> {<flag>}
 		return false;
 	}
 
+	if (!exists(file_path)) {
+		clif->message(fd, msg_fd(fd, 1387)); /// File not found.
+		return false;
+	}
+
+	if (!is_file(file_path)) {
+		clif->message(fd, msg_fd(fd, 1518)); /// Not a file.
+		return false;
+	}
+
+	FILE *fp = fopen(file_path, "r");
+
+	if (fp == NULL) {
+		clif->message(fd, msg_fd(fd, 1519)); /// Can't open file.
+		return false;
+	}
+
+	fclose(fp);
+
+	if (!npc->unloadfile(file_path, (flag != 0))) {
+		clif->message(fd, msg_fd(fd, 1517)); /// Script could not be unloaded.
+		return false;
+	}
+
+	clif->message(fd, msg_fd(fd, 1386)); /// File unloaded. Be aware that...
+	npc->addsrcfile(file_path);
+	npc->parsesrcfile(file_path, true);
+	npc->read_event_script();
+	clif->message(fd, msg_fd(fd, 262)); /// Script loaded.
 	return true;
 }
 
@@ -6576,47 +6614,52 @@ ACMD(reset)
 /*==========================================
  *
  *------------------------------------------*/
+
+/**
+ * Spawns mobs which treats the invoking as its master.
+ *
+ * @code{.herc}
+ *	@summon <monster name/ID> {<duration>}
+ * @endcode
+ *
+ **/
 ACMD(summon)
 {
-	char name[NAME_LENGTH];
-	int mob_id = 0;
+	char name[NAME_LENGTH + 1] = {'\0'};
 	int duration = 0;
-	struct mob_data *md;
-	int64 tick=timer->gettick();
 
-	if (!*message || sscanf(message, "%23s %12d", name, &duration) < 1)
-	{
-		clif->message(fd, msg_fd(fd,1225)); // Please enter a monster name (usage: @summon <monster name> {duration}).
+	if (*message == '\0' || sscanf(message, "%24s %12d", name, &duration) < 1) {
+		clif->message(fd, msg_fd(fd, 1225)); /// Please enter a monster name (usage: @summon <monster name> {duration}).
 		return false;
 	}
 
-	if (duration < 1)
-		duration =1;
-	else if (duration > 60)
-		duration =60;
+	int mob_id = atoi(name);
 
-	if ((mob_id = atoi(name)) == 0)
+	if (mob_id == 0)
 		mob_id = mob->db_searchname(name);
-	if(mob_id == 0 || mob->db_checkid(mob_id) == 0)
-	{
-		clif->message(fd, msg_fd(fd,40)); // Invalid monster ID or name.
+
+	if (mob_id == 0 || mob->db_checkid(mob_id) == 0) {
+		clif->message(fd, msg_fd(fd, 40)); /// Invalid monster ID or name.
 		return false;
 	}
 
-	md = mob->once_spawn_sub(&sd->bl, sd->bl.m, -1, -1, DEFAULT_MOB_JNAME, mob_id, "", SZ_SMALL, AI_NONE);
+	struct mob_data *md = mob->once_spawn_sub(&sd->bl, sd->bl.m, -1, -1, DEFAULT_MOB_JNAME, mob_id, "",
+						  SZ_SMALL, AI_NONE, 0);
 
-	if(!md)
+	if (md == NULL)
 		return false;
 
 	md->master_id = sd->bl.id;
 	md->special_state.ai = AI_ATTACK;
-	md->deletetimer = timer->add(tick+(duration*60000),mob->timer_delete,md->bl.id,0);
-	clif->specialeffect(&md->bl,344,AREA);
-	mob->spawn(md);
-	sc_start4(NULL,&md->bl, SC_MODECHANGE, 100, 1, 0, MD_AGGRESSIVE, 0, 60000);
-	clif->skill_poseffect(&sd->bl,AM_CALLHOMUN,1,md->bl.x,md->bl.y,tick);
-	clif->message(fd, msg_fd(fd,39)); // All monster summoned!
 
+	const int64 tick = timer->gettick();
+
+	md->deletetimer = timer->add(tick + (int64)cap_value(duration, 1, 60) * 60000, mob->timer_delete, md->bl.id, 0);
+	clif->specialeffect(&md->bl, 344, AREA);
+	mob->spawn(md);
+	sc_start4(NULL, &md->bl, SC_MODECHANGE, 100, 1, 0, MD_AGGRESSIVE, 0, 60000);
+	clif->skill_poseffect(&sd->bl, AM_CALLHOMUN, 1, md->bl.x, md->bl.y, tick);
+	clif->message(fd, msg_fd(fd, 39)); /// All monster summoned!
 	return true;
 }
 
@@ -8048,10 +8091,11 @@ ACMD(duel)
 		return false;
 	}
 
-	if (!duel->checktime(sd)) {
+	int64 diff = duel->difftime(sd);
+	if (diff > 0) {
 		char output[CHAT_SIZE_MAX];
-		// "Duel: You can take part in duel only one time per %d minutes."
-		sprintf(output, msg_fd(fd,356), battle_config.duel_time_interval);
+		// "Duel: You can take part in duel again after %d secconds."
+		sprintf(output, msg_fd(fd,356), (int)diff);
 		clif->message(fd, output);
 		return false;
 	}
@@ -8101,10 +8145,11 @@ ACMD(leave)
 
 ACMD(accept)
 {
-	if (!duel->checktime(sd)) {
+	int64 diff = duel->difftime(sd);
+	if (diff > 0) {
 		char output[CHAT_SIZE_MAX];
-		// "Duel: You can take part in duel only one time per %d minutes."
-		sprintf(output, msg_fd(fd,356), battle_config.duel_time_interval);
+		// "Duel: You can take part in duel again after %d seconds."
+		sprintf(output, msg_fd(fd,356), (int)diff);
 		clif->message(fd, output);
 		return false;
 	}
@@ -9007,19 +9052,54 @@ ACMD(addperm)
 	return true;
 }
 
+/**
+ * Unloads a script file.
+ * Note: Be aware that some changes made by NPC are not reverted on unload. See doc/atcommands.txt for details.
+ *
+ * @code{.herc}
+ *	@unloadnpcfile <path> {<flag>}
+ * @endcode
+ *
+ **/
 ACMD(unloadnpcfile)
 {
-	if (!*message) {
-		clif->message(fd, msg_fd(fd,1385)); // Usage: @unloadnpcfile <file name>
+	char format[20];
+
+	snprintf(format, sizeof(format), "%%%ds %%1d", MAX_DIR_PATH);
+
+	char file_path[MAX_DIR_PATH + 1] = {'\0'};
+	int flag = 1;
+
+	if (*message == '\0' || (sscanf(message, format, file_path, &flag) < 1)) {
+		clif->message(fd, msg_fd(fd, 1385)); /// Usage: @unloadnpcfile <path> {<flag>}
 		return false;
 	}
 
-	if (npc->unloadfile(message)) {
-		clif->message(fd, msg_fd(fd,1386)); // File unloaded. Be aware that mapflags and monsters spawned directly are not removed.
-	} else {
-		clif->message(fd, msg_fd(fd,1387)); // File not found.
+	if (!exists(file_path)) {
+		clif->message(fd, msg_fd(fd, 1387)); /// File not found.
 		return false;
 	}
+
+	if (!is_file(file_path)) {
+		clif->message(fd, msg_fd(fd, 1518)); /// Not a file.
+		return false;
+	}
+
+	FILE *fp = fopen(file_path, "r");
+
+	if (fp == NULL) {
+		clif->message(fd, msg_fd(fd, 1519)); /// Can't open file.
+		return false;
+	}
+
+	fclose(fp);
+
+	if (!npc->unloadfile(file_path, (flag != 0))) {
+		clif->message(fd, msg_fd(fd, 1517)); /// Script could not be unloaded.
+		return false;
+	}
+
+	clif->message(fd, msg_fd(fd, 1386)); /// File unloaded. Be aware that...
 	return true;
 }
 

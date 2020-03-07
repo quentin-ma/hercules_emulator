@@ -59,6 +59,12 @@ struct status_change_entry;
 #define MAX_SKILLUNITGROUPTICKSET 25
 #define MAX_SKILL_NAME_LENGTH     32
 
+// Custom Skill Ranges is used in skill_get_index, to allocate indexes based on ID and gaps between 2 SkillID
+#ifndef CUSTOM_SKILL_RANGES
+	#define CUSTOM_SKILL_RANGES
+#endif  // CUSTOM_SKILL_RANGES
+
+
 // (Epoque:) To-do: replace this macro with some sort of skill tree check (rather than hard-coded skill names)
 #define skill_ischangesex(id) ( \
 	((id) >= BD_ADAPTATION     && (id) <= DC_SERVICEFORYOU) || ((id) >= CG_ARROWVULCAN && (id) <= CG_MARIONETTE) || \
@@ -2013,6 +2019,7 @@ struct skill_interface {
 	int (*cast_fix_sc) ( struct block_list *bl, int time);
 	int (*vf_cast_fix) ( struct block_list *bl, double time, uint16 skill_id, uint16 skill_lv);
 	int (*delay_fix) ( struct block_list *bl, uint16 skill_id, uint16 skill_lv);
+	bool (*is_item_skill) (struct map_session_data *sd, int skill_id, int skill_lv);
 	int (*check_condition_castbegin) (struct map_session_data *sd, uint16 skill_id, uint16 skill_lv);
 	int (*check_condition_castend) (struct map_session_data *sd, uint16 skill_id, uint16 skill_lv);
 	int (*consume_requirement) (struct map_session_data *sd, uint16 skill_id, uint16 skill_lv, short type);

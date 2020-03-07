@@ -553,6 +553,28 @@ enum siege_type {
 };
 
 /**
+ * Types of MadoGear
+ */
+enum mado_type {
+	MADO_ROBOT = 0x00,
+	// unused  = 0x01,
+	MADO_SUITE = 0x02,
+#ifndef MADO_MAX
+	MADO_MAX
+#endif
+};
+
+/**
+ * Option flags for itemskill() script command.
+ **/
+enum itemskill_flag {
+	ISF_NONE = 0x00,
+	ISF_IGNORECONDITIONS = 0x01, // Ignore skill conditions and don't consume them.
+	ISF_INSTANTCAST = 0x02, // Cast skill instantaneously.
+	ISF_CASTONSELF = 0x04, // Forcefully cast skill on invoking character without showing the target selection cursor.
+};
+
+/**
  * Structures
  **/
 
@@ -1054,6 +1076,7 @@ struct script_interface {
 	void (*run_item_rental_end_script) (struct map_session_data *sd, struct item_data *data, int oid);
 	void (*run_item_rental_start_script) (struct map_session_data *sd, struct item_data *data, int oid);
 	void (*run_item_lapineddukddak_script) (struct map_session_data *sd, struct item_data *data, int oid);
+	bool (*sellitemcurrency_add) (struct npc_data *nd, struct script_state* st, int argIndex);
 };
 
 #ifdef HERCULES_CORE

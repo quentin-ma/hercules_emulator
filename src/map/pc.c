@@ -5257,6 +5257,14 @@ static int pc_useitem(struct map_session_data *sd, int n)
 #endif
 			if( battle_config.item_restricted_consumption_type && sd->status.inventory[n].expire_time == 0 ) {
 				clif->useitemack(sd,n,sd->status.inventory[n].amount-1,true);
+
+				// If Earth Spike Scroll is used while SC_EARTHSCROLL is active, there is a chance to don't consume the scroll. [Kenpachi]
+				if ((nameid == ITEMID_EARTH_SCROLL_1_3 || nameid == ITEMID_EARTH_SCROLL_1_5)
+				    && sd->sc.count > 0 && sd->sc.data[SC_EARTHSCROLL] != NULL
+				    && rnd() % 100 > sd->sc.data[SC_EARTHSCROLL]->val2) {
+					return 0;
+				}
+
 				pc->delitem(sd, n, 1, 1, DELITEM_NORMAL, LOG_TYPE_CONSUME);
 			}
 			return 0;
@@ -5302,8 +5310,34 @@ static int pc_useitem(struct map_session_data *sd, int n)
 	script->run_use_script(sd, sd->inventory_data[n], npc->fake_nd->bl.id);
 	script->potion_flag = 0;
 
+	// If Earth Spike Scroll is used while SC_EARTHSCROLL is active, there is a chance to don't consume the scroll. [Kenpachi]
+	if ((nameid == ITEMID_EARTH_SCROLL_1_3 || nameid == ITEMID_EARTH_SCROLL_1_5) && sd->sc.count > 0
+	    && sd->sc.data[SC_EARTHSCROLL] != NULL && rnd() % 100 > sd->sc.data[SC_EARTHSCROLL]->val2) {
+		removeItem = false;
+	}
+
 	if (removeItem)
 		pc->delitem(sd, n, 1, 1, DELITEM_NORMAL, LOG_TYPE_CONSUME);
+	return 1;
+}
+
+/**
+ * Sets state flags and helper variables, used by itemskill() script command, to 0.
+ *
+ * @param sd The character's session data.
+ * @return 0 if parameter sd is NULL, otherwise 1.
+ */
+static int pc_itemskill_clear(struct map_session_data *sd)
+{
+	nullpo_ret(sd);
+
+	sd->itemskill_id = 0;
+	sd->itemskill_lv = 0;
+	sd->state.itemskill_conditions_checked = 0;
+	sd->state.itemskill_no_conditions = 0;
+	sd->state.itemskill_no_casttime = 0;
+	sd->state.itemskill_castonself = 0;
+
 	return 1;
 }
 
@@ -8417,8 +8451,12 @@ static int64 pc_readparam(const struct map_session_data *sd, int type)
 		case SP_FLEE1:           val = sd->battle_status.flee; break;
 		case SP_FLEE2:           val = sd->battle_status.flee2; break;
 		case SP_DEFELE:          val = sd->battle_status.def_ele; break;
-#ifndef RENEWAL_CAST
 		case SP_VARCASTRATE:
+#ifdef RENEWAL_CAST
+			val = sd->bonus.varcastrate;
+			break;
+#else
+			FALLTHROUGH
 #endif
 		case SP_CASTRATE:
 				val = sd->castrate;
@@ -8504,7 +8542,6 @@ static int64 pc_readparam(const struct map_session_data *sd, int type)
 		case SP_FIXCASTRATE:     val = sd->bonus.fixcastrate; break;
 		case SP_ADD_FIXEDCAST:   val = sd->bonus.add_fixcast; break;
 #ifdef RENEWAL_CAST
-		case SP_VARCASTRATE:     val = sd->bonus.varcastrate; break;
 		case SP_ADD_VARIABLECAST:val = sd->bonus.add_varcast; break;
 #endif
 	}
@@ -9345,15 +9382,23 @@ static void pc_setridingpeco(struct map_session_data *sd, bool flag)
  *
  * @param sd Target player.
  * @param flag New state.
+ * @param mtype Type of the mado gear.
  **/
-static void pc_setmadogear(struct map_session_data *sd, bool flag)
+static void pc_setmadogear(struct map_session_data *sd, bool flag, enum mado_type mtype)
 {
 	nullpo_retv(sd);
+	Assert_retv(mtype >= MADO_ROBOT && mtype < MADO_MAX);
+
 	if (flag) {
-		if ((sd->job & MAPID_THIRDMASK) == MAPID_MECHANIC)
+		if ((sd->job & MAPID_THIRDMASK) == MAPID_MECHANIC) {
 			pc->setoption(sd, sd->sc.option|OPTION_MADOGEAR);
+#if PACKETVER_MAIN_NUM >= 20191120 || PACKETVER_RE_NUM >= 20191106
+			sc_start(&sd->bl, &sd->bl, SC_MADOGEAR, 100, (int)mtype, INFINITE_DURATION);
+#endif
+		}
 	} else if (pc_ismadogear(sd)) {
 		pc->setoption(sd, sd->sc.option&~OPTION_MADOGEAR);
+		// pc->setoption resets status effects when changing mado, no need to re do it here.
 	}
 }
 
@@ -12637,6 +12682,7 @@ void pc_defaults(void)
 	pc->unequipitem_pos = pc_unequipitem_pos;
 	pc->checkitem = pc_checkitem;
 	pc->useitem = pc_useitem;
+	pc->itemskill_clear = pc_itemskill_clear;
 
 	pc->skillatk_bonus = pc_skillatk_bonus;
 	pc->skillheal_bonus = pc_skillheal_bonus;
