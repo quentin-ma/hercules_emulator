@@ -1,0 +1,49 @@
+payon,200,222,4	script	PvP Warper	843,{
+mes "[ ^ff0000PVP Warper^000000 ]";
+mes "Est-ce que tu veux aller au PvP affronter les autres joueurs?";
+menu "Encore heureux !",L_Yes,"Nah, j'suis pas encore assez fort(e).",L_No;
+
+L_Yes:
+next;
+mes "[ ^ff0000PVP Warper^000000 ]";
+mes "Tu veux rentrer dans quel PvP?";
+menu	"PVP Arena [ Ancient - Nightmare ] [" + getmapusers("force_4-1.gat") + " / 20]",L1,
+	"PvP Arena [ Ancient - Normal ] [" + getmapusers("guild_vs3.gat") + " / 20]",L2,
+	"PvP Arena [ No - Yggdrasil Berry ] [" + getmapusers("guild_vs4.gat") + " / 20]",L3;
+
+L1:
+if (getmapusers("force_4-1.gat") >= 20) goto Lsorry;
+warp "force_4-1",103,104;
+close;
+
+L2:
+if (getmapusers("guild_vs3.gat") >= 20) goto Lsorry;
+warp "guild_vs3",0,0;
+close;
+
+L3:
+if (getmapusers("guild_vs4.gat") >= 20) goto Lsorry;
+if(countitem(607)) goto Lsorry2;
+warp "guild_vs4",0,0;
+close;
+
+Lsorry:
+next;
+mes "[ ^ff0000PVP Warper^000000 ]";
+mes "Désolé, ce PvP est déjà plein, essaye en un autre.";
+close;
+
+Lsorry2:
+next;
+mes "[ ^ff0000PVP Warper^000000 ]";
+mes "Désolé tu ne peux pas avoir "+getitemname(607)+" sur toi en rentrant dans l'arène, range dans le storage est réessaye.";
+close;
+
+L_No:
+close;
+}
+
+// Mapflags
+force_4-1	mapflag	pvp
+guild_vs3	mapflag	pvp
+guild_vs4	mapflag	pvp
