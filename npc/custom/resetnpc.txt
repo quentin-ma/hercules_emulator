@@ -12,6 +12,7 @@
 //= 1.2 Cleaning [Euphy]
 //= 1.3 All statuses removed upon skill reset. [Euphy]
 //============================================================
+//Traduit par Atypik
 
 payon,127,215,4	script	Reset Girl	4_F_TELEPORTER,{
 
@@ -20,45 +21,45 @@ payon,127,215,4	script	Reset Girl	4_F_TELEPORTER,{
 	set .@ResetBoth,9000;	// Zeny for resetting both together
 
 	mes "[Reset Girl]";
-	mes "I am the Reset Girl.";
+	mes "Je suis la Reset Girl.";
 	mes "Reset Stats: "+ .@ResetStat +"z";
 	mes "Reset Skills: "+ .@ResetSkill +"z";
-	mes "Reset Both: "+ .@ResetBoth +"z";
-	mes "Please select the service you want:";
+	mes "Reset les deux: "+ .@ResetBoth +"z";
+	mes "Choisissez le service que vous souhaitez :";
 	next;
 	switch(select("^FF3355Reset Skills", "Reset Stats", "Reset Both^000000", "Cancel")) {
 	case 1:
 		mes "[Reset Girl]";
 		if (Zeny < .@ResetSkill) {
-			mes "Sorry, you don't have enough Zeny.";
+			mes "Désolé, vous n'avez pas assez de zeny.";
 			close;
 		}
 		Zeny -= .@ResetSkill;
 		sc_end SC_ALL;
 		resetskill;
-		mes "There you go!";
+		mes "Et voilà!";
 		close;
 	case 2:
 		mes "[Reset Girl]";
 		if (Zeny < .@ResetStat) {
-			mes "Sorry, you don't have enough Zeny.";
+			mes "Désolé, vous n'avez pas assez de zeny.";
 			close;
 		}
 		Zeny -= .@ResetStat;
 		resetstatus;
-		mes "There you go!";
+		mes "Et voilà!";
 		close;
 	case 3:
 		mes "[Reset Girl]";
 		if (Zeny < .@ResetBoth) {
-			mes "Sorry, you don't have enough Zeny.";
+			mes "Désolé, vous n'avez pas assez de zeny.";
 			close;
 		}
 		Zeny -= .@ResetBoth;
 		sc_end SC_ALL;
 		resetskill;
 		resetstatus;
-		mes "There you go!";
+		mes "Et voilà!";
 		close;
 	case 4:
 		close;
